@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Sentex: The Cellar</title>
+  <!-- Procedurális, beágyazott favicon (nincs asset-fájl) → nincs /favicon.ico 404. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23241d2a'/%3E%3Ccircle cx='16' cy='16' r='8' fill='%23cdbfe0'/%3E%3Ccircle cx='16' cy='16' r='3.4' fill='%23c22a1a'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Főmenü -->
+  <div id="menu" class="overlay menu">
+    <!-- Hangulati réteg: parázs-részecskék -->
+    <div class="menu-atmos" aria-hidden="true">
+      <span class="ember"></span><span class="ember"></span><span class="ember"></span>
+      <span class="ember"></span><span class="ember"></span><span class="ember"></span>
+      <span class="ember"></span><span class="ember"></span><span class="ember"></span>
+      <span class="ember"></span><span class="ember"></span><span class="ember"></span>
+    </div>
+
+    <!-- Bal oldal: Nim történetének hangos narrációja — gomb indítja (nem auto) -->
+    <aside class="menu-narration" id="menuNarration" aria-label="Narration">
+      <button class="narration-play" data-action="narrator" aria-label="Nim's Story — play narration">
+        <span class="narration-ring" aria-hidden="true"></span>
+        <span class="narration-ic" aria-hidden="true"></span>
+      </button>
+      <div class="narration-label">Nim's Story</div>
+      <div class="narration-hint" id="narrationHint">click to listen</div>
+    </aside>
+
+    <!-- Jobb oldal: Nim, a főhős (procedurálisan rajzolva) -->
+    <div class="menu-hero" aria-hidden="true">
+      <canvas id="menuChar" class="menu-char"></canvas>
+      <div class="menu-hero-name">Nim</div>
+    </div>
+
+    <div class="menu-card">
+      <div class="title">THE CELLAR</div>
+      <div class="subtitle-row">
+        <span class="rule"></span>
+        <div class="subtitle">Sentex</div>
+        <span class="rule r"></span>
+      </div>
+
+      <div id="menuGreet" class="menu-greet"></div>
+
+      <nav class="menu-nav">
+        <button class="menu-link primary" data-action="start">Play</button>
+        <button class="menu-link" data-action="rank">Rank</button>
+        <button class="menu-link" data-action="settings">Settings</button>
+      </nav>
+    </div>
+  </div>
+
+  <!-- Szünet -->
+  <div id="pause" class="overlay hidden">
+    <div class="title small">PAUSED</div>
+    <button class="btn" data-action="resume">RESUME</button>
+    <button class="btn" data-action="menu">QUIT</button>
+  </div>
+
+  <!-- Skill-tárgy felvétele: megerősítő ablak a leírással -->
+  <div id="itemoffer" class="overlay hidden">
+    <div class="offer-card" id="offerCard">
+      <div class="offer-badge" id="offerBadge">🛒 PURCHASE</div>
+      <div class="offer-title" id="offerTitle"></div>
+      <div class="offer-desc" id="offerDesc"></div>
+      <div class="offer-sub" id="offerSub"></div>
+      <div class="offer-actions">
+        <button class="btn" data-action="offer-accept" id="offerAccept">BUY</button>
+        <button class="btn small ghost" data-action="offer-decline" id="offerDecline">CANCEL</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Over -->
+  <div id="gameover" class="overlay hidden">
+    <div class="title small" id="goTitle">YOU DIED</div>
+    <div class="gameover-score" id="finalScore"></div>
+    <canvas id="goMedal" class="go-medal hidden" width="104" height="104" aria-hidden="true"></canvas>
+    <div class="gameover-rank" id="finalRank"></div>
+    <div class="gameover-best" id="finalBest"></div>
+    <button class="btn" data-action="start">RETRY</button>
+    <button class="btn" data-action="menu">MAIN MENU</button>
+  </div>
+
+  <!-- Karakternév bekérő modal -->
+  <div id="nameModal" class="overlay hidden">
+    <div class="offer-card">
+      <div class="offer-badge">🧑 CHARACTER</div>
+      <div class="offer-title" id="nameModalTitle">What's your name, adventurer?</div>
+      <div class="offer-desc">You'll appear on the leaderboard under this name.</div>
+      <input id="nameInput" class="name-input" maxlength="12" placeholder="Character name" autocomplete="off" />
+      <div class="name-rule">Letters and numbers only · max 12 · no spaces</div>
+      <div class="offer-actions">
+        <button class="btn" id="nameSave">GO</button>
+        <button class="btn ghost hidden" id="nameCancel">CANCEL</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RANG: teljes képernyős, admin-kinézetű lap -->
+  <div id="rank" class="overlay sheetpage hidden">
+    <div class="admin-bar">
+      <span class="admin-title">🏅 RANK</span>
+      <div class="admin-tabs" id="rankTabs"></div>
+      <button class="btn small" data-action="menu">← BACK</button>
+    </div>
+    <div id="rankBody" class="page-body"></div>
+  </div>
+
+  <!-- BEÁLLÍTÁSOK: teljes képernyős, admin-kinézetű lap -->
+  <div id="settings" class="overlay sheetpage hidden">
+    <div class="admin-bar">
+      <span class="admin-title">⚙ SETTINGS</span>
+      <button class="btn small" data-action="menu">← BACK</button>
+    </div>
+    <div id="settingsBody" class="page-body"></div>
+  </div>
+
+  <!-- Mobil érintővezérlés -->
+  <div id="touch">
+    <div id="stick"><div class="knob"></div></div>
+    <div id="shootpad"><div class="knob"></div></div>
+  </div>
+
+  <div class="hint">Sentex: The Cellar · © Easyskill Team</div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
