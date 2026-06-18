@@ -1,12 +1,9 @@
 /**
- * Közös admin-UI építőelemek (Fázis 0).
- *
- * Minden admin lap EZEKBŐL épül, hogy egységes, letisztult, „eszköz"-jellegű
- * (nem játékos-grafikus) felület legyen. Tisztán DOM — a régi canvas-rajzolású
- * viewereket fokozatosan ezek váltják fel (lásd ADMIN_TEENDOK.md).
+ * Közös DOM-UI építőelemek a teljes képernyős lapokhoz (RANG, BEÁLLÍTÁSOK).
+ * Tisztán DOM, hogy egységes, letisztult felület legyen.
  */
 
-/** Egy DOM-alapú admin lap életciklusa (a Game mountolja/unmountolja). */
+/** Egy DOM-alapú lap életciklusa (mount/unmount). */
 export interface AdminPanel {
   /** Felépíti és beilleszti a tartalmát a megadott konténerbe. */
   mount(host: HTMLElement): void;
@@ -190,6 +187,48 @@ export function toggleField(o: ToggleOpts): HTMLElement {
   return el('label', { class: 'adm-field' }, [
     el('span', { class: 'adm-field-label', text: o.label }),
     btn,
+  ]);
+}
+
+export interface SliderOpts {
+  label: string;
+  /** Aktuális érték (a `min`..`max` tartományban). */
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  /** A jobb oldali érték-kijelzés formázása (pl. százalék). Alap: egész. */
+  format?: (v: number) => string;
+  /** Folyamatos visszajelzés húzás közben (nem ment, csak alkalmaz). */
+  onChange: (v: number) => void;
+}
+
+/** Címkézett csúszka (natív range) + élő érték-kijelzés, sorvonallal. */
+export function slider(o: SliderOpts): HTMLElement {
+  const min = o.min ?? 0;
+  const max = o.max ?? 1;
+  const fmt = o.format ?? ((v: number) => String(Math.round(v)));
+  const input = el('input', { class: 'adm-slider' }) as HTMLInputElement;
+  input.type = 'range';
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(o.step ?? 0.01);
+  input.value = String(o.value);
+  // A kitöltött (arany) rész a fogantyúig tartson: a `--fill` adja a százalékot.
+  const setFill = (v: number): void => {
+    input.style.setProperty('--fill', `${((v - min) / (max - min)) * 100}%`);
+  };
+  setFill(o.value);
+  const val = el('span', { class: 'adm-slider-val', text: fmt(o.value) });
+  input.addEventListener('input', () => {
+    const v = parseFloat(input.value);
+    setFill(v);
+    val.textContent = fmt(v);
+    o.onChange(v);
+  });
+  return el('label', { class: 'adm-field' }, [
+    el('span', { class: 'adm-field-label', text: o.label }),
+    el('span', { class: 'adm-slider-wrap' }, [input, val]),
   ]);
 }
 

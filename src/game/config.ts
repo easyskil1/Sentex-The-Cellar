@@ -3,7 +3,7 @@
  * Minden "varázsszám" ide kerül, hogy a balanszolás egy helyen történjen.
  */
 
-/** A szoba belső rácsa a sablonokhoz (Isaac-méret: 13×7 cella). */
+/** A szoba belső rácsa a sablonokhoz (13×7 cella). */
 export const GRID = {
   W: 13,
   H: 7,
@@ -36,8 +36,11 @@ export const HP = {
 export const PLAYER_BASE = {
   r: 22,
   speed: 230,
-  accel: 2400,
-  friction: 9,
+  // „Snappy" mozgásprofil: a steady-state sebesség ≈ accel/friction (a speed-cap
+  // vágja 230-ra), így accel ÉS friction arányos emelése a VÉGSEBESSÉGET tartja,
+  // de a felgyorsulást/megállást ~2× pattanósabbá teszi (kevésbé „úszós").
+  accel: 4200,
+  friction: 14,
   dmg: 300, // a harci gazdaság ×100-on él (finomabb enemy-HP hangolás); a HUD a valós pontot mutatja (300,0)
   fireRate: 0.72, // mp/lövés (nagyobb = ritkábban lő); 0.4→0.72 ≈ 45%-kal ritkább tűz
   shotSpeed: 320, // lövedék tempója px/mp (430→320 ≈ 26%-kal lassabb, súlyosabb)
@@ -58,6 +61,24 @@ export const DUNGEON = {
   MIN_ROOMS: 10,
   /** Felső korlát, hogy a mély szintek ne szálljanak el. */
   MAX_ROOMS: 16,
+};
+
+// ── Labirintus visszaszámláló ────────────────────────────────────────────────
+// A labirintusnak idő-limitje van: a játékosnak a kijáratig kell érnie, mielőtt
+// lejár. Az időkeret a maze legrövidebb útjából (`pathLen`) számítódik, hogy
+// minden generált pálya a saját méretéhez igazodjon, nem fix érték.
+//   limit = max(MIN, (pathLen·TILE / játékos-sebesség) · PACE) + BONUS
+export const LAB_TIMER = {
+  /**
+   * A puszta egyenes-séta-idő (legrövidebb úton) szorzója. >1, mert a valóságban
+   * kanyarodni, gyorsulni/fékezni és ellenfelekkel harcolni kell - ez adja a
+   * „pontos idő, ami alatt végig lehet vinni" reális becslését.
+   */
+  PACE: 2.5,
+  /** Ráhagyás másodpercben a számolt idő fölött (a „kevés plusz idő"). */
+  BONUS: 12,
+  /** Alsó korlát: rövid labirintusnál is legyen értelmes a keret. */
+  MIN: 25,
 };
 
 export const STORAGE_KEY = 'sentex_pince_best';

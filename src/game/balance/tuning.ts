@@ -27,7 +27,7 @@ export interface BalanceTuning {
    *  nő MINDEN nem-boss ellenfél sebzése (lövedék/érintés/talaj-veszély egyaránt).
    *  Lásd difficulty.ts → enemyDamageMul. (+12% = 0.12) */
   atkFloorSlope: number;
-  /** A bejövő-sebzés szorzó felső plafonja (Isaac-minta: fél→teljes szív, de a
+  /** A bejövő-sebzés szorzó felső plafonja (fél→teljes szív minta, de a
    *  mély szinteken sem szállhat el). */
   enemyDmgMaxMul: number;
   /** Klasszikus boss fix életereje. */

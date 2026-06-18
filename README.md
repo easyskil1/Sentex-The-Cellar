@@ -1,6 +1,6 @@
 # Sentex: The Cellar
 
-Isaac-style top-down roguelike, built on a **custom Canvas engine + TypeScript + Vite** —
+Top-down roguelike, built on a **custom Canvas engine + TypeScript + Vite**, with
 no game-engine dependency. All graphics are **procedural** (drawn from code, no asset files).
 
 ## Play

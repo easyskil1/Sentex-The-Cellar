@@ -1,4 +1,5 @@
 import type { EnemyKind } from '../enemyTypes';
+import type { BossTarget } from '../bossRegistry';
 
 /**
  * Az ellenségek kinézetének önálló renderelője — leválasztva az Enemy
@@ -9,7 +10,7 @@ import type { EnemyKind } from '../enemyTypes';
  * így a stat-tábla átszínezésével a kinézet is követi.
  */
 export interface EnemyVisual {
-  kind: EnemyKind;
+  kind: EnemyKind | BossTarget;
   x: number;
   y: number;
   r: number;
@@ -34,4 +35,8 @@ export interface EnemyVisual {
   charge?: 'idle' | 'wind' | 'dash'; // Wave 6: nyers roham-fázis (minotaurusz/vámpír/hárpia/vérfarkas)
   petrified?: boolean; // Wave 6: vízköpő kő-fázisa (szobor)
   hpFrac?: number; // Wave 6: HP-arány (a hidra fejszámához)
+  /** Boss-specifikus: egyedi fázisok vagy állapotok. */
+  bossState?: string;
+  /** Boss-specifikus: karok/szárnyak állapota. */
+  arms?: boolean;
 }

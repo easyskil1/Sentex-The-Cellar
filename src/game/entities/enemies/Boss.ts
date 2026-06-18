@@ -1,3 +1,4 @@
+import { drawEnemy } from './renderers';
 import type { World } from '../../World';
 import type { IEnemy } from './Enemy';
 import { TAU, clamp } from '../../../engine/math';
@@ -33,22 +34,22 @@ export class Boss implements IEnemy {
   speed = 80;
   dmg: number; // érintés-sebzés fél-szívben (×HP.half a kijelzett pont)
   col: string;
-  col2 = '#2a1438';
+  col2 = '#1a0606';
   readonly score: number;
   flash = 0;
 
   private readonly attacks: BossAttack[];
-  private wob = 0;
-  private bob = 0;
-  private state: BossState = 'idle';
-  private stateT = 2;
-  private pattern = 0;
-  private shootCd = 1;
-  private cvx = 0;
-  private cvy = 0;
-  private entering = true;
+  protected wob = 0;
+  protected bob = 0;
+  protected state: BossState = 'idle';
+  protected stateT = 2;
+  protected pattern = 0;
+  protected shootCd = 1;
+  protected cvx = 0;
+  protected cvy = 0;
+  protected entering = true;
 
-  constructor(public x: number, public y: number, floor: number, color = '#9c4bd8', config: BossConfig = {}) {
+  constructor(public x: number, public y: number, floor: number, color = '#ff5a5a', config: BossConfig = {}) {
     this.col = color;
     // Boss NEM skálázódik a mélységgel — fix életerő (lásd balance/tuning.ts).
     this.hp = config.hp ?? TUNING.bossClassicHp;
@@ -129,152 +130,35 @@ export class Boss implements IEnemy {
     }
   }
 
-    draw(ctx: CanvasRenderingContext2D): void {
-      // Árnyék
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.beginPath();
-      ctx.ellipse(this.x, this.y + this.r * 0.9, this.r * 1.2, this.r * 0.45, 0, 0, TAU);
-      ctx.fill();
+  draw(ctx: CanvasRenderingContext2D): void {
+    drawEnemy(ctx, {
+      kind: 'boss',
+      x: this.x,
+      y: this.y,
+      r: this.r,
+      col: this.col,
+      col2: this.col2,
+      flash: this.flash > 0,
+      bob: this.bob,
+      wob: this.wob,
+      face: this.state === 'dash' ? Math.atan2(this.cvy, this.cvx) : 0,
+      moving: this.state === 'dash' || !this.entering,
+      charge: this.state === 'dash' ? 'dash' : 'idle',
+      active: this.shootCd < 0.4,
+      arms: this.hasArms(),
+    });
 
-      ctx.save();
-      ctx.translate(this.x, this.y);
-
-      const flash = this.flash > 0;
-      const pulse = 1 + Math.sin(this.bob) * 0.04;
-
-      // Külső aura
-      const aura = ctx.createRadialGradient(0, 0, 10, 0, 0, this.r * 1.8);
-      aura.addColorStop(0, 'rgba(255,60,60,0.15)');
-      aura.addColorStop(1, 'rgba(0,0,0,0)');
-
-      ctx.fillStyle = aura;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.r * 1.8, 0, TAU);
-      ctx.fill();
-
-      // Kezek — a test MÖGÉ rajzolva. Az alap Fenevadnak nincs keze (üres hook),
-      // de a variánsok (pl. A mérges Fenevad) felülírhatják.
-      this.drawArms(ctx, flash);
-
-      // Fő test
-      const grad = ctx.createRadialGradient(-10, -12, 8, 0, 0, this.r);
-      grad.addColorStop(0, flash ? '#ffffff' : '#ff5a5a');
-      grad.addColorStop(0.45, flash ? '#ffdede' : '#9b1c31');
-      grad.addColorStop(1, '#1a0612');
-
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 5;
-
-      ctx.shadowColor = '#ff2244';
-      ctx.shadowBlur = 28;
-
-      ctx.beginPath();
-      ctx.ellipse(0, 0, this.r, this.r * pulse, 0, 0, TAU);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.shadowBlur = 0;
-
-      // Tüskék körben
-      for (let i = 0; i < 14; i++) {
-        const a = (i / 14) * TAU + this.wob * 0.2;
-
-        const x1 = Math.cos(a) * this.r * 0.9;
-        const y1 = Math.sin(a) * this.r * 0.9;
-
-        const x2 = Math.cos(a) * this.r * 1.35;
-        const y2 = Math.sin(a) * this.r * 1.35;
-
-        ctx.strokeStyle = '#2b0000';
-        ctx.lineWidth = 4;
-
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      }
-
-      // Szarvak
-      ctx.fillStyle = '#120000';
-
-      ctx.beginPath();
-      ctx.moveTo(-18, -this.r + 8);
-      ctx.lineTo(-38, -this.r - 24);
-      ctx.lineTo(-6, -this.r + 2);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(18, -this.r + 8);
-      ctx.lineTo(38, -this.r - 24);
-      ctx.lineTo(6, -this.r + 2);
-      ctx.closePath();
-      ctx.fill();
-
-      // Arc (szem + száj) — felülírható hook, hogy a variánsok más arcot kaphassanak.
-      this.drawFace(ctx, flash);
-
-      ctx.restore();
+    // HP-csík
+    if (this.hp < this.maxHp) {
+      const w = this.r * 2.2;
+      const x = this.x - w / 2;
+      const y = this.y - this.r - 14;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(x, y, w, 5);
+      ctx.fillStyle = '#ff5b6a';
+      ctx.fillRect(x, y, w * clamp(this.hp / this.maxHp, 0, 1), 5);
     }
+  }
 
-    /**
-     * Az arc (szem + száj) rajza a test lokális koordinátáiban (a középpont 0,0).
-     * Az alap Fenevad: fekete szem-alap + izzó piros szem, fekete ívelt száj fehér
-     * fogakkal. A variánsok felülírják (lásd `Boss3` — A mérges Fenevad).
-     */
-    protected drawFace(ctx: CanvasRenderingContext2D, flash: boolean): void {
-      // Szemek
-      ctx.fillStyle = '#000';
-
-      ctx.beginPath();
-      ctx.arc(-16, -8, 10, 0, TAU);
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.arc(16, -8, 10, 0, TAU);
-      ctx.fill();
-
-      // Izzó szemek
-      ctx.fillStyle = flash ? '#fff' : '#ff2d2d';
-
-      ctx.shadowColor = '#ff0000';
-      ctx.shadowBlur = 14;
-
-      ctx.beginPath();
-      ctx.arc(-16, -8, 5, 0, TAU);
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.arc(16, -8, 5, 0, TAU);
-      ctx.fill();
-
-      ctx.shadowBlur = 0;
-
-      // Száj
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 5;
-
-      ctx.beginPath();
-      ctx.arc(0, 12, 18, 0.15 * Math.PI, 0.85 * Math.PI);
-      ctx.stroke();
-
-      // Fogak
-      ctx.fillStyle = '#fff';
-
-      for (let i = -2; i <= 2; i++) {
-        ctx.beginPath();
-        ctx.moveTo(i * 6, 22);
-        ctx.lineTo(i * 6 - 3, 14);
-        ctx.lineTo(i * 6 + 3, 14);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-
-    /**
-     * A kezek/karok rajza a test lokális koordinátáiban (a test MÖGÉ). Az alap
-     * Fenevadnak nincs keze (üres), a variánsok felülírják.
-     */
-    protected drawArms(_ctx: CanvasRenderingContext2D, _flash: boolean): void {}
+  protected hasArms(): boolean { return false; }
 }

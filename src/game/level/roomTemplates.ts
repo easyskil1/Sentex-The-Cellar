@@ -6,7 +6,7 @@ import { MAP_ANIM_BY_CH, type MapAnimDraw } from './mapAnim';
 import { ROW_LEN, tokenAt } from './cell';
 
 /**
- * Szoba-sablon értelmező (Isaac-stílusú "map"-ek).
+ * Szoba-sablon értelmező (rácsos "map"-ek).
  *
  * A konkrét sablonok fejezetenként a `levels.ts`-ben élnek. Itt csak a közös
  * formátum és a kibontás van. A rács GRID.W × GRID.H cella (13×7).

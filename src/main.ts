@@ -5,6 +5,8 @@ import { AudioManager } from './engine/Audio';
 import { Game } from './game/Game';
 import { Overlays } from './ui/Overlays';
 import { drawPlayer } from './game/entities/PlayerRenderer';
+import { FpsMeter } from './ui/FpsMeter';
+import { loadRenderScale, loadFullscreenPref } from './game/settings';
 // Side-effect: a böngészőbe mentett pályákat betölti (helyben felülírja a MAPS-ot),
 // hogy a szerkesztett pályák a játékban is érvényesüljenek, ne csak az editorban.
 import './game/level/mapStore';
@@ -32,6 +34,19 @@ function init() {
   audio.registerVoice('narrator', `${voiceBase}voice/narrator.mp3`);
   audio.registerVoice('nim', `${voiceBase}voice/nim.mp3`);
   audio.registerVoice('sentex', `${voiceBase}voice/sentex.mp3`);
+
+  // Sample-alapú háttérzene (Kevin MacLeod / incompetech.com, CC-BY 4.0 — lásd
+  // public/music/CREDITS.md). Fejezetenként más „calm" hangulat + közös harci
+  // (combat) track-ek → a zene nem egyhangú. Lustán töltődik első használatkor.
+  const musicBase = `${voiceBase}music/`;
+  audio.registerMusic('menu', `${musicBase}Echoes_of_Time_v2.mp3`);   // főmenü
+  audio.registerMusic('pince', `${musicBase}Hush.mp3`);               // Pince
+  audio.registerMusic('ureg', `${musicBase}Long_Note_Four.mp3`);      // Üreg
+  audio.registerMusic('melyseg', `${musicBase}Anguish.mp3`);          // Mélység
+  audio.registerMusic('necropolis', `${musicBase}Ossuary_1_-_A_Beginning.mp3`); // Necropolis
+  audio.registerMusic('dragonlair', `${musicBase}Darkling.mp3`);      // Dragon's Lair
+  audio.registerMusic('combat1', `${musicBase}Crypto.mp3`);           // harc A
+  audio.registerMusic('combat2', `${musicBase}Heavy_Interlude.mp3`);  // harc B
 
   const game = new Game(engine, audio, input, overlays);
 
@@ -61,6 +76,22 @@ function init() {
     eyeY = Math.max(-1, Math.min(1, (e.clientY - cy) / 200));
     drawMenuCharacter(eyeX, eyeY);
   });
+
+  engine.setRenderScale(loadRenderScale());   // mentett render-felbontás alkalmazása
+  new FpsMeter(engine);   // valós FPS-kijelző (jobb lent), a Beállítások kapcsolja
+
+  // Alapból teljes képernyő: a böngésző csak felhasználói gesztusból enged
+  // fullscreent, ezért az ELSŐ kattintásra/billentyűre lépünk be (ha a beállítás
+  // engedi). Egyszeri: a listener saját magát távolítja el.
+  const goFullscreenOnce = (): void => {
+    removeEventListener('pointerdown', goFullscreenOnce);
+    removeEventListener('keydown', goFullscreenOnce);
+    if (loadFullscreenPref() && !document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    }
+  };
+  addEventListener('pointerdown', goFullscreenOnce);
+  addEventListener('keydown', goFullscreenOnce);
 
   engine.start(game);
 }

@@ -65,11 +65,11 @@ export class Player {
   /** Látótáv 0..1 (1 = teljes szoba látszik; ez alatt a szél besötétül). */
   sight = PLAYER_BASE.sight;
 
-  // Lerakható robbanószerek (Isaac-stílus)
+  // Lerakható robbanószerek
   tnt = 0;
   bombs = 0;
 
-  // Aktív képesség (Isaac „active item")
+  // Aktív képesség (active item)
   activeSkillId: string | null = null;
   skillCharge = 0;
 
@@ -148,9 +148,22 @@ export class Player {
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.walkPhase += sp * dt * 0.05;
-    this.headLean += (mv.x * 4 - this.headLean) * dt * 8;
+    // Fej-dőlés: gyorsabb interpoláció (8→14), hogy a vizuális reakció ne késsen.
+    this.headLean += (mv.x * 4 - this.headLean) * dt * 14;
 
-    world.resolveCircle(this); // kövek/akadályok
+    // Kövek/akadályok: a resolveCircle KITOL a falból, de a sebesség marad — ettől
+    // fal mellett csúszva mikro-jitter keletkezne (újra-behatol → újra-kitol). A
+    // pozíció-deltából kiolvassuk a fal-normált, és a BEFELÉ tartó sebesség-
+    // komponenst levesszük (sliding response), a tangenciálisat (csúszás) hagyjuk.
+    const preX = this.x, preY = this.y;
+    world.resolveCircle(this);
+    const pushX = this.x - preX, pushY = this.y - preY;
+    if (pushX !== 0 || pushY !== 0) {
+      const pl = Math.hypot(pushX, pushY);
+      const nx = pushX / pl, ny = pushY / pl;
+      const vn = this.vx * nx + this.vy * ny;
+      if (vn < 0) { this.vx -= vn * nx; this.vy -= vn * ny; }
+    }
     if (this.clampAndDoors(world)) return; // szobaváltás történt
 
     // Lövésirány: nyilak / jobb stick, vagy egér célzás

@@ -21,6 +21,8 @@ export class ParticleSystem {
   private pool: Particle[] = [];
   /** Aktív részecskék száma; a pool[0..count) az élők, a többi újrahasználható. */
   private count = 0;
+  /** Szín → előre rajzolt lágy bélyegző (offscreen canvas). Lustán töltődik. */
+  private readonly stamps = new Map<string, HTMLCanvasElement>();
 
   spawn(x: number, y: number, color: string, count: number, speed = 180, life = 0.5): void {
     for (let i = 0; i < count; i++) {
@@ -79,12 +81,47 @@ export class ParticleSystem {
     for (let i = 0; i < this.count; i++) {
       const it = this.pool[i]!;
       const a = clamp(it.life / it.max, 0, 1);
+      // Lágy, szín szerint gyorsítótárazott „bélyegző" + drawImage a forró úton:
+      // gyorsabb, mint a per-részecske arc+fill, és szebb (puha izzó perem).
+      const stamp = this.stampFor(it.color);
+      const r = it.size * a * STAMP_SCALE;
       ctx.globalAlpha = a;
-      ctx.fillStyle = it.color;
-      ctx.beginPath();
-      ctx.arc(it.x, it.y, it.size * a, 0, TAU);
-      ctx.fill();
+      ctx.drawImage(stamp, it.x - r, it.y - r, r * 2, r * 2);
     }
     ctx.globalAlpha = 1;
   }
+
+  /** Szín szerinti bélyegző (egyszer legenerálva, utána újrahasznált). */
+  private stampFor(color: string): HTMLCanvasElement {
+    let s = this.stamps.get(color);
+    if (!s) { s = makeStamp(color); this.stamps.set(color, s); }
+    return s;
+  }
+}
+
+/** Méret-skála: a bélyegző tömör magja ~az eredeti korong, körötte puha izzás. */
+const STAMP_SCALE = 1.8;
+
+/**
+ * Lágy, kör alakú részecske-bélyegző: tömör szín-kitöltés + radiális alfa-maszk
+ * (`destination-in`), így BÁRMILYEN színformátumra (hex/rgb/név) működik. A mag
+ * majdnem tömör, a perem átlátszóba olvad — ez adja a puha, izzó kinézetet.
+ */
+function makeStamp(color: string): HTMLCanvasElement {
+  const S = 32;
+  const r = S / 2;
+  const cv = document.createElement('canvas');
+  cv.width = S;
+  cv.height = S;
+  const c = cv.getContext('2d')!;
+  c.fillStyle = color;
+  c.fillRect(0, 0, S, S);
+  c.globalCompositeOperation = 'destination-in';
+  const g = c.createRadialGradient(r, r, 0, r, r, r);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.92)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, S, S);
+  return cv;
 }

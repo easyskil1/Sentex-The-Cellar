@@ -6,7 +6,7 @@ import { CHAPTER_OVERRIDES } from './chapterOverrides';
 import { HARD_LABYRINTH, cloneLabyrinthConfig, type LabyrinthConfig } from './labyrinth';
 
 /**
- * Fejezet = egy „világ" több szinttel (Isaac-stílus). Minden fejezetnek saját
+ * Fejezet = egy „világ" több szinttel. Minden fejezetnek saját
  * szoba-sablon készlete, ellenfél-palettája, témája és boss-neve van.
  *
  * ITT TERVEZED A PÁLYÁKAT: a `BASE_CHAPTERS` tömbbe írod, hogy melyik fejezetben
@@ -89,6 +89,24 @@ const THEME_MELYSEG: Theme = {
   decorations: ['#2a2440', '#3a2d5a', '#ff5b8a'], // Kristályok, sötét kövek színei
 };
 
+// Holtak városa — vörös-csont-fekete, fáklyafényes kripta.
+const THEME_NECRO: Theme = {
+  floor: '#241016', grid: 'rgba(0,0,0,0.32)', vignette: 0.52,
+  wall: '#3a1a1a', wallEdge: '#1a0a0a', wallTop: 'rgba(255,180,160,0.05)',
+  doorFrame: '#1a0a0a', doorFloor: '#241016', doorBar: '#6a2828', doorBarStroke: '#2a1010',
+  rock: '#5a4a4a', rockStroke: '#2a2020', bossColor: '#ff3b3b', accent: '#e0a890',
+  decorations: ['#3a1a1a', '#5a2828', '#e0a890'], // Sírkövek, vér, csont árnyalatai
+};
+
+// Sárkányfészek — arany-tűz-fekete, izzó parázzsal.
+const THEME_LAIR: Theme = {
+  floor: '#241a10', grid: 'rgba(0,0,0,0.3)', vignette: 0.55,
+  wall: '#3a2a14', wallEdge: '#1a1208', wallTop: 'rgba(255,210,140,0.06)',
+  doorFrame: '#1a1208', doorFloor: '#241a10', doorBar: '#7a5424', doorBarStroke: '#3a2810',
+  rock: '#5a4e3a', rockStroke: '#2a2418', bossColor: '#ff8030', accent: '#f0a830',
+  decorations: ['#3a2a14', '#6a4420', '#f0a830'], // Arany, parázs, kristály színei
+};
+
 /** A választható téma-alapok (új fejezet ezek egyikének kinézetét örökli). */
 export type ThemeBaseId = 'pince' | 'ureg' | 'melyseg';
 export const THEME_BASES: ThemeBaseId[] = ['pince', 'ureg', 'melyseg'];
@@ -149,9 +167,44 @@ function baseChapters(): Chapter[] {
       normalTemplates: MAPS.melyseg.normal,
       bossTemplates: MAPS.melyseg.boss,
       difficultyMul: 1,
-      description: 'Kristályoktól izzó, hideg mélység — a leereszkedés vége.',
+      description: 'Kristályoktól izzó, hideg mélység, egyre lejjebb a sötétbe.',
       story: 'Itt már nincs felszín, nincs visszaút. A kristályok lüktető fénye '
         + 'idegen geometriát rajzol a falakra. Valami ősi vár rád a sötét fenekén.',
+    },
+    {
+      id: 'necropolis',
+      name: 'Necropolis',
+      category: 'fejezet',
+      floors: 2,
+      enemyKinds: ['skeleton', 'wraith', 'banshee', 'imp', 'vampire', 'bat', 'gargoyle',
+        'medusa', 'harpy', 'mummy', 'summoner', 'healer', 'enrager', 'confuser', 'blinker',
+        'gunner', 'sniper', 'tick', 'wisp'],
+      bossName: 'Satan',
+      theme: THEME_NECRO,
+      normalTemplates: MAPS.necropolis.normal,
+      bossTemplates: MAPS.necropolis.boss,
+      difficultyMul: 1,
+      description: 'Csontból és sírkőből rakott holt város, ahol a halottak nem nyugszanak.',
+      story: 'A mélység alatt eltemetett város terül el. Koporsók nyikorognak, a fáklyák '
+        + 'maguktól lobbannak, és a falból kinyúló kezek a nevedet suttogják. Maga a Sátán '
+        + 'tartja itt udvarát.',
+    },
+    {
+      id: 'dragonlair',
+      name: "Dragon's Lair",
+      category: 'fejezet',
+      floors: 2,
+      enemyKinds: ['minotaur', 'cyclops', 'golem', 'hydra', 'werewolf', 'scorpion', 'serpent',
+        'scarab', 'leech', 'slammer', 'kamikaze', 'striker', 'leaper', 'flanker', 'blocker',
+        'mortar', 'shotgunner', 'bombthrower', 'turret', 'gasbag', 'puller', 'worm', 'roach'],
+      bossName: 'Dragon',
+      theme: THEME_LAIR,
+      normalTemplates: MAPS.dragonlair.normal,
+      bossTemplates: MAPS.dragonlair.boss,
+      difficultyMul: 1,
+      description: 'Izzó, aranytól és parázstól fénylő sárkánybarlang, a leereszkedés legmélye.',
+      story: 'A legalsó kamrában a hőség elviselhetetlen. Felhalmozott kincs csillog a parázs '
+        + 'fényében, és a sötétből két (vagy négy?) szempár figyel. A sárkány ébren van.',
     },
   ];
 }

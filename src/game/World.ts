@@ -2,9 +2,9 @@ import type { Engine } from '../engine/Engine';
 import type { AudioManager } from '../engine/Audio';
 import type { Input } from '../engine/Input';
 import type { IEnemy } from './entities/enemies/Enemy';
-import type { Rect, EnemyBullet, Floater, Dir, Hazard, HazardKind, Obstacle, ObstacleKind } from './types';
+import type { Rect, EnemyBullet, Dir, HazardKind, Obstacle } from './types';
 import { OBSTACLES } from './types';
-import { drawRock, drawTree, drawCrate, drawLuckRock, drawTerrainObstacle, obstacleShardColor } from './level/obstacleRender';
+import { drawRock, drawTree, drawCrate, drawLuckRock, drawTerrainObstacle } from './level/obstacleRender';
 import { drawFloorTiles, drawPuddles, drawSplats, drawDecorations, drawLuckFloor } from './level/floorRender';
 
 import { Player } from './entities/Player';
@@ -13,7 +13,7 @@ import { Enemy } from './entities/enemies/Enemy';
 import { drawEnemy } from './entities/enemies/EnemyRenderer';
 import { drawBullet } from './entities/BulletRenderer';
 import { BOSS_REGISTRY, isBossTarget, type BossTarget } from './entities/enemies/bossRegistry';
-import { CHAMPION_TRAITS, type EnemyKind, type ChampionTrait } from './entities/enemies/enemyTypes';
+import { CHAMPION_TRAITS, ENEMY_STATS, type EnemyKind, type ChampionTrait } from './entities/enemies/enemyTypes';
 import { Pickup, type PickupType } from './entities/Pickup';
 import { Shop, offerView, type ShopStall } from './entities/Shop';
 import { Pedestal } from './entities/Pedestal';
@@ -22,16 +22,30 @@ import { rollGamble, GAMBLE_COST, rerollPrice } from './content/shopPricing';
 import { Dungeon } from './level/Dungeon';
 import { Room } from './level/Room';
 import { ParticleSystem } from './Particles';
-import { ROOM, GRID, PLAYER_BASE, HP } from './config';
-import { TAU, rand, randi, clamp, dist2, pick } from '../engine/math';
+import { CollisionSystem } from './systems/CollisionSystem';
+import { FXManager } from './systems/FXManager';
+import { HazardSystem } from './systems/HazardSystem';
+import { EntityManager } from './systems/EntityManager';
+import { LightingSystem } from './systems/LightingSystem';
+import { computeVisibility, type Seg } from './systems/visibility';
+import { buildOccluder, type OccluderShape } from './systems/occluder';
+import { loadShadowMode, saveShadowMode, saveShake, type ShadowMode } from './settings';
+import { ROOM, GRID, PLAYER_BASE, HP, LAB_TIMER } from './config';
+import { TAU, rand, clamp, dist2, pick } from '../engine/math';
 import { parseTemplate, type BossKind } from './level/roomTemplates';
-import { drawGate as drawGatePortal, drawDungeonGate as drawDungeonPortal } from './level/gateRender';
+import {
+  drawGate as drawGatePortal,
+  drawDungeonGate as drawDungeonPortal,
+} from './level/gateRender';
+import { drawHubPortal, drawHubGlyph, drawHubTitle } from './level/hubRender';
+import { drawLabWalls, drawLabExit, drawLabFrame, drawLabOverlay } from './level/labyrinthRender';
+import { drawGlow, withGlow } from './level/lightRender';
 import { resolveLevel, CHAPTERS, chapterFloorRange } from './level/levels';
 import { enemyScale, scaleIncomingDamage, enemyDamageMul, NO_SCALE, type EnemyScale } from './balance/difficulty';
 import { TUNING } from './balance/tuning';
 import { SKILL_BY_ID } from './content/skills';
 import { Bomb, type BombType } from './entities/Bomb';
-import { dropConfig, roomDropChance, netSum, CRATE_DROP_CHANCE } from './content/dropConfig';
+import { dropConfig, roomDropChance, netSum } from './content/dropConfig';
 import type { Theme } from './level/theme';
 import type { Labyrinth } from './level/labyrinth';
 import { RunStats, recordFloorClear, recordLabClear } from './stats';
@@ -57,6 +71,11 @@ export interface WorldCallbacks {
 /** A játékost ért sebzés hang-kategóriája (forrás szerint). */
 export type HurtSound = 'hurt' | 'acid' | 'burn' | 'zap';
 
+/** A hub-terem (mód-választó) négy portálja. */
+export type HubChoice = 'story' | 'dungeon' | 'labyrinth' | 'boss';
+/** Egy hub-portál: a célmód, a rács-pozíciója, és hogy zárt-e (még nincs megírva). */
+interface HubPortal { id: HubChoice; col: number; row: number; locked: boolean; }
+
 /** Admin · Beállítások — különálló csalás-kapcsolók (a régi „God Mode" helyett). */
 export interface Cheats {
   /** Örök élet: a játékos nem kap sebzést. */
@@ -69,8 +88,6 @@ export interface Cheats {
 
 const CHEAT_MAX_GOLD = 999;
 const CHEATS_KEY = 'sentex_cheats';
-/** Bombázott KŐ esélye, hogy érme lapul alatta (klasszikus „kő alatt arany"). */
-const ROCK_COIN_CHANCE = 0.25;
 
 /** A mentett csalás-kapcsolók visszaolvasása (megőrződnek újratöltés után). */
 function readCheats(): Cheats {
@@ -92,6 +109,8 @@ function readCheats(): Cheats {
 export class World {
   readonly player = new Player();
   readonly particles = new ParticleSystem();
+  /** Ütközés/geometria-rendszer — a World facade-metódusai (és a HazardSystem) ide delegálnak. */
+  readonly collision = new CollisionSystem(this);
   /** A bolti stand, amelynek vásárlás-ajánlata épp döntésre vár (felugró ablak). */
   private pendingStall: ShopStall | null = null;
   /** Az ingyenes tárgy-pedesztál, amelynek skill-ajánlata épp döntésre vár. */
@@ -100,10 +119,39 @@ export class World {
   private pendingGambleItem: Item | null = null;
   /** Igaz, ha épp egy puszta értesítő ablak van nyitva (pl. „Nem nyertél"). */
   private pendingNotice = false;
-  tears: Tear[] = [];
-  ebullets: EnemyBullet[] = [];
-  hazards: Hazard[] = [];
-  private floaters: Floater[] = [];
+  /** Röpke entitások (könnyek / ellenfél-lövedékek / bombák) birtokosa; a World gettereken át delegál. */
+  private readonly entities = new EntityManager();
+  /** A játékos könnyei — az EntityManager listája (a hívási helyek változatlanok). */
+  get tears(): Tear[] { return this.entities.tears; }
+  /** Ellenfél-lövedékek — az EntityManager listája. */
+  get ebullets(): EnemyBullet[] { return this.entities.ebullets; }
+  /** Talaj-veszélyek rendszere (méreg/tűz/köd/akna) — a World addHazard-ja ide delegál. */
+  private readonly hazards = new HazardSystem(this);
+  /** Effekt-réteg (lebegő szövegek + képernyőrázás) — a World facade-metódusai ide delegálnak. */
+  private readonly fx = new FXManager();
+  /** 2D fény-térkép (ambient sötétség + dinamikus lámpák, multiply kompozit). */
+  private readonly lighting = new LightingSystem();
+  /** Vetett árnyék minősége (grafikai beállítás): off | hard | soft. */
+  shadowMode: ShadowMode = loadShadowMode();
+  /** A szoba-doboz négy éle (a sugarak a falnál állnak meg) — szobánként gyorsítótárazva. */
+  private readonly roomBox: Seg[] = [];
+  /** A tömör tárgyak árnyékvető sziluettjei (közép+sugár+élek) — szobánként gyorsítótárazva. */
+  private readonly occShapes: OccluderShape[] = [];
+  /** Per-frame összeállított aktív takaró-lista (szoba-doboz + a fáklya közelében
+   *  lévő tárgyak élei) — újrahasznált tömb, csak referenciákat másol (nincs GC). */
+  private readonly activeOccluders: Seg[] = [];
+  private occluderKey = '';
+  /** A fáklya látható-poligonja (újrahasznált lapos tömb, nincs frame-allokáció). */
+  private readonly torchPoly: number[] = [];
+  /**
+   * A torchPoly utolsó újraszámolásának állapota: a fénypont (player) pozíciója és
+   * az akkori occluder-kulcs. A szögseprés (computeVisibility) a fény-rendszer
+   * legdrágább lépése, ezért csak akkor futtatjuk újra, ha a player érdemben
+   * elmozdult, vagy a szoba/akadályok változtak; egyébként az előző poligon marad.
+   */
+  private sweepX = NaN;
+  private sweepY = NaN;
+  private sweepKey = '';
 
   dungeon!: Dungeon;
   floor = 1;
@@ -141,7 +189,6 @@ export class World {
     try { localStorage.setItem(CHEATS_KEY, JSON.stringify(this._cheats)); } catch { /* nem elérhető */ }
   }
 
-  private shake = 0;
   private transition = 0;
   private enemySlowT = 0;
   /** Kísérők (familiar) közös fázis-órája — a keringő orbok szögéhez. */
@@ -152,7 +199,7 @@ export class World {
   private enemyFreezeT = 0;
   /** Ajtó-animáció: 0 = zárt rács, 1 = teljesen felhúzva (a szoba kipucolva). */
   private doorT = 1;
-  private bombs: Bomb[] = [];
+  private get bombs(): Bomb[] { return this.entities.bombs; }
   private trapdoor: { x: number; y: number; bob: number } | null = null;
   /** A Game köti be: a játékos labirintus-kapura lépett → a Game a world.startLabyrinth-et hívja. */
   onEnterLabyrinth: (() => void) | null = null;
@@ -174,8 +221,24 @@ export class World {
   private readonly labBox: Rect = { x: 0, y: 0, w: 0, h: 0 };
   private labWon = false;
   private labWinTimer = 0;
+  /** Visszaszámláló: a teljes időkeret (mp) és a hátralévő idő (mp). 0-ra érve a futás véget ér. */
+  private labTimeLimit = 0;
+  private labTimeLeft = 0;
   /** A Game köti be: a labirintus lezárult (kijárat elérve / ESC) → vissza a kontextushoz. */
   onLabyrinthExit: (() => void) | null = null;
+
+  /**
+   * Aktív hub-terem (mód-választó). Ha be van állítva, a World harc nélküli
+   * hub-módban fut: középen a játékos, a négy fal felé egy-egy portál
+   * (TÖRTÉNET / DUNGEON / LABIRINTUS / BOSS). Null = nincs hub.
+   */
+  private hub: HubPortal[] | null = null;
+  /** A hub külön konténer-szobája (a `dungeon` ÉRINTETLEN marad alatta). */
+  private hubRoom: Room | null = null;
+  /** A hub-portál „élesítése": csak lelépés után süt el újra (ne ismételjen). */
+  private hubArmed = true;
+  /** A Game köti be: a játékos egy NYITOTT hub-portálra lépett → a Game indítja a módot. */
+  onHubChoice: ((id: HubChoice) => void) | null = null;
 
   private readonly _room: Rect = { x: 0, y: 0, w: 0, h: 0 };
   private _theme: Theme = resolveLevel(1).chapter.theme;
@@ -188,6 +251,9 @@ export class World {
    */
   private floorCache: HTMLCanvasElement | null = null;
   private floorCacheKey = '';
+  /** Maradandó vérfoltok rétege (a floorCache mintájára) — csak változáskor sül újra. */
+  private splatCache: HTMLCanvasElement | null = null;
+  private splatCacheKey = '';
   /** Újrahasznosított ellenfél-iterációs puffer (a frame-enkénti spread helyett). */
   private readonly enemyScratch: IEnemy[] = [];
   /**
@@ -211,15 +277,26 @@ export class World {
   get room(): Rect { return this._room; }
   get cx(): number { return this._room.x + this._room.w / 2; }
   get cy(): number { return this._room.y + this._room.h / 2; }
-  /** A jelenlegi szoba — labirintus alatt a külön konténer, egyébként a dungeon aktuális szobája. */
-  get currentRoom(): Room { return this.labRoom ?? this.dungeon.current; }
+  /** A jelenlegi szoba — hub/labirintus alatt a külön konténer, egyébként a dungeon aktuális szobája. */
+  get currentRoom(): Room { return this.hubRoom ?? this.labRoom ?? this.dungeon.current; }
   get enemies(): IEnemy[] { return this.currentRoom.enemies; }
+
+  /** Az aktuális szinthez tartozó fejezet azonosítója (a zenei téma-választáshoz). */
+  get chapterId(): string { return resolveLevel(this.floor).chapter.id; }
   /** Igaz, ha épp a labirintus különleges pálya fut (kamera-követéses mód). */
   get isLabyrinth(): boolean { return this.labyrinth !== null; }
+  /** Igaz, ha épp a hub-terem (mód-választó) fut — harc/szobaváltás nélkül. */
+  get isHub(): boolean { return this.hub !== null; }
+  /** Az aktív labirintus objektum (vagy null) — a CollisionSystem ezt olvassa a fal-ütközéshez. */
+  get lab(): Labyrinth | null { return this.labyrinth; }
+  /** A labirintus visszaszámláló: hátralévő idő (mp), nem-negatív. A HUD olvassa. */
+  get labTimeRemaining(): number { return Math.max(0, this.labTimeLeft); }
+  /** A labirintus teljes időkerete (mp) — a HUD a vész-sávhoz viszonyítja. */
+  get labTimeBudget(): number { return this.labTimeLimit; }
 
-  addShake(v: number): void { this.shake = Math.min(this.shake + v, 20); }
+  addShake(v: number): void { this.fx.addShake(v); }
   addFloater(x: number, y: number, text: string, color = '#f3e2bf'): void {
-    this.floaters.push({ x, y, text, color, life: 1.1, vy: -46 });
+    this.fx.addFloater(x, y, text, color);
   }
 
   /**
@@ -229,31 +306,12 @@ export class World {
    * bejövő sebzés (piros, − előjel); egyébként kifelé adott sebzés.
    */
   addDamage(x: number, y: number, amount: number, opts: { color?: string; toPlayer?: boolean } = {}): void {
-    const v = Math.round(amount);
-    if (v <= 0) return;
-    const color = opts.color ?? (opts.toPlayer ? '#ff5b6a' : '#fff2c8');
-    // visszafogott méret: a nagyobb ütés alig nagyobb (kicsi, nem tolakodó)
-    const size = clamp((opts.toPlayer ? 13 : 11) + Math.sqrt(v) * 0.1, 11, 17);
-    this.floaters.push({
-      x: x + rand(-6, 6),
-      y,
-      text: opts.toPlayer ? `−${v}` : `${v}`,
-      color,
-      life: 0.9,
-      max: 0.9,
-      vy: opts.toPlayer ? -64 : -96,
-      vx: rand(-26, 26),
-      size,
-    });
+    this.fx.addDamage(x, y, amount, opts);
   }
 
-  /** Talaj-veszély lerakása (ellenfelek hívják: méreg/tűz/köd/akna). */
+  /** Talaj-veszély lerakása (lásd HazardSystem) — ellenfelek/bossok hívják. */
   addHazard(kind: HazardKind, x: number, y: number, r: number, life: number, arm = 0): void {
-    // a szobán belülre szorítjuk, hogy ne lógjon ki a falba
-    const rc = this._room;
-    x = clamp(x, rc.x + 6, rc.x + rc.w - 6);
-    y = clamp(y, rc.y + 6, rc.y + rc.h - 6);
-    this.hazards.push({ kind, x, y, r, life, maxLife: life, age: 0, tick: 0, arm });
+    this.hazards.add(kind, x, y, r, life, arm);
   }
 
   /** Boss-példány a sablon által megadott registry-célból (mind a 10 boss). */
@@ -262,7 +320,7 @@ export class World {
     const color = this._theme.bossColor;
     return BOSS_REGISTRY[kind].make(x, y, floor, color);
   }
-  hasNeighbor(dir: Dir): boolean { return this.dungeon.hasNeighbor(dir); }
+  hasNeighbor(dir: Dir): boolean { return this.hub ? false : this.dungeon.hasNeighbor(dir); }
   isCurrentRoomCleared(): boolean { return this.currentRoom.cleared; }
   get theme(): Theme { return this._theme; }
   floorName(): string {
@@ -275,6 +333,8 @@ export class World {
   newGame(startFloor = 1): void {
     this.labyrinth = null; // friss futás mindig normál szoba-módban indul
     this.labRoom = null;
+    this.hub = null;
+    this.hubRoom = null;
     this.computeRoom();
     this.floor = Math.max(1, Math.floor(startFloor));
     this.score = 0;
@@ -284,19 +344,61 @@ export class World {
     this._theme = resolveLevel(this.floor).chapter.theme;
     this.dungeon = new Dungeon(this.floor);
     this.player.reset(this.cx, this.cy);
-    this.tears = [];
-    this.ebullets = [];
-    this.hazards = [];
-    this.floaters = [];
+    this.entities.clear();
+    this.hazards.clear();
+    this.fx.clear();
     this.particles.clear();
     this.trapdoor = null;
     this.enemySlowT = 0;
-    this.bombs = [];
     // kezdő skill induljon feltöltve, hogy azonnal kipróbálható legyen
     const startSkill = this.player.activeSkillId ? SKILL_BY_ID[this.player.activeSkillId] : undefined;
     if (startSkill) this.player.skillCharge = startSkill.chargeMax;
     this.spawnRoomContents(this.currentRoom);
     this.doorT = this.currentRoom.cleared ? 1 : 0;
+  }
+
+  /**
+   * Hub-terem (mód-választó) indítása: harc nélküli kezdő-terem, középen a
+   * játékossal és a négy fal felé egy-egy portállal. A NYITOTT portálra lépve a
+   * Game indítja a megfelelő módot (TÖRTÉNET / LABIRINTUS), a ZÁRT portál
+   * (DUNGEON / BOSS — még nincs megírva) csak „hamarosan" jelzést ad. A
+   * `dungeon` (menü-háttér) ÉRINTETLEN marad alatta, mint a labirintusnál.
+   */
+  startHub(): void {
+    this.labyrinth = null;
+    this.labRoom = null;
+    this.sandbox = false;
+    this.hubArmed = true;
+    this._theme = resolveLevel(1).chapter.theme;
+    // külön konténer-szoba (cleared → nem fut a harc/ajtó-logika)
+    this.hubRoom = new Room(0, 0, 'normal');
+    this.hubRoom.cleared = true;
+    this.hubRoom.spawned = true;
+    // a négy portál a négy fal felé; a labelek a portál ALATT jelennek meg
+    this.hub = [
+      { id: 'story',     col: 6,    row: 0.7, locked: false },
+      { id: 'labyrinth', col: 1.2,  row: 3,   locked: false },
+      { id: 'dungeon',   col: 10.8, row: 3,   locked: true },
+      { id: 'boss',      col: 6,    row: 5.3, locked: true },
+    ];
+    this.computeRoom();
+    this.player.reset(this.cx, this.cy);
+    this.entities.clear();
+    this.hazards.clear();
+    this.fx.clear();
+    this.trapdoor = null;
+    this.enemySlowT = 0;
+    this.particles.clear();
+    this.floorCache = null;
+  }
+
+  /** A hub elhagyása (menübe lépéskor): a konténer-szoba eldobása, normál szoba vissza. */
+  exitHub(): void {
+    if (!this.hub) return;
+    this.hub = null;
+    this.hubRoom = null;
+    this.floorCache = null;
+    this.computeRoom();
   }
 
   /**
@@ -307,12 +409,20 @@ export class World {
    * (nehézség) a hívó kontextusából jön (world-kapu: jelenlegi szint).
    */
   startLabyrinth(lab: Labyrinth, theme: Theme, enemyKinds: EnemyKind[], chapterId = 'labyrinth'): void {
+    this.hub = null;        // hubból indítva a konténer-szoba átadja a helyét a labRoom-nak
+    this.hubRoom = null;
     this.labyrinth = lab;
     this.labChapterId = chapterId;
     this._theme = theme;
     // a nehézség a MEGLÉVŐ szintből jön (world-kapu: aktuális szint; admin-teszt: 1)
     this.labWon = false;
     this.labWinTimer = 0;
+    // Visszaszámláló: a legrövidebb út (pathLen tile) egyenes-séta-ideje, reális
+    // tempó-szorzóval (kanyarok/harc) + ráhagyás. Így minden generált labirintus a
+    // saját méretéhez kap időkeretet (lásd LAB_TIMER).
+    const minWalk = (lab.pathLen * ROOM.TILE) / PLAYER_BASE.speed;
+    this.labTimeLimit = Math.max(LAB_TIMER.MIN, minWalk * LAB_TIMER.PACE) + LAB_TIMER.BONUS;
+    this.labTimeLeft = this.labTimeLimit;
     this.runStats.startLab();
     // külön konténer-szoba: a `dungeon` (világ-haladás) ÉRINTETLEN marad alatta
     this.labRoom = new Room(0, 0, 'normal');
@@ -321,11 +431,9 @@ export class World {
     this.computeRoom();
 
     // a World-szintű effekt-tömbök frissek (a dungeon szobáé érintetlen)
-    this.tears = [];
-    this.ebullets = [];
-    this.hazards = [];
-    this.floaters = [];
-    this.bombs = [];
+    this.entities.clear();
+    this.hazards.clear();
+    this.fx.clear();
     this.trapdoor = null;
     this.enemySlowT = 0;
     this.particles.clear();
@@ -345,10 +453,16 @@ export class World {
   /** Labirintus-ellenfelek a maze spawn-helyeire, a fejezet palettájából sorsolva. */
   private spawnLabEnemies(lab: Labyrinth, kinds: EnemyKind[]): void {
     if (kinds.length === 0) return;
+    // A labirintusban NINCS repülő ellenfél: a `floats` típusok átszállnának a
+    // maze falain (egy útvesztőben értelmetlen), ezért kiszűrjük őket. Ha a
+    // fejezet palettája CSAK repülőkből áll, maradunk az eredetinél, hogy legyen
+    // kivel harcolni.
+    const grounded = kinds.filter((k) => !ENEMY_STATS[k].floats);
+    const pool = grounded.length > 0 ? grounded : kinds;
     const TILE = ROOM.TILE;
     const scale = enemyScale(this.floor, this.player);
     for (const s of lab.spawns) {
-      const kind = pick(kinds);
+      const kind = pick(pool);
       const x = (s.col + 0.5) * TILE;
       const y = (s.row + 0.5) * TILE;
       this.currentRoom.enemies.push(new Enemy(kind, x, y, scale));
@@ -359,9 +473,7 @@ export class World {
   exitLabyrinth(): void {
     if (!this.labyrinth) return;
     this.clearLabyrinthState();
-    this.tears = [];
-    this.ebullets = [];
-    this.bombs = [];
+    this.entities.clear();
     this.particles.clear();
     this.onLabyrinthExit?.();
   }
@@ -380,12 +492,6 @@ export class World {
   }
 
   /** Igaz, ha a (col,row) maze-cella tömör fal (a pályán kívül is fal). */
-  private labWallCell(col: number, row: number): boolean {
-    const lab = this.labyrinth!;
-    if (col < 0 || row < 0 || col >= lab.W || row >= lab.H) return true;
-    return lab.wall[row * lab.W + col]!;
-  }
-
   /**
    * Admin · teszt-aréna: egyetlen ellenfelet (vagy bosst) dob be egy véletlen
    * fejezet kinézetű, akadályokkal teli szobába, hogy élőben megnézhető legyen.
@@ -394,6 +500,8 @@ export class World {
   startSandbox(target: EnemyKind | BossTarget, champion: ChampionTrait | null = null): void {
     this.labyrinth = null;
     this.labRoom = null;
+    this.hub = null;
+    this.hubRoom = null;
     this.computeRoom();
     this.floor = 1 + Math.floor(rand(0, 24)); // véletlen szint → véletlen téma/akadályok
     this.score = 0;
@@ -402,14 +510,12 @@ export class World {
     this._theme = resolveLevel(this.floor).chapter.theme;
     this.dungeon = new Dungeon(this.floor);
     this.player.reset(this.cx, this.cy);
-    this.tears = [];
-    this.ebullets = [];
-    this.hazards = [];
-    this.floaters = [];
+    this.entities.clear();
+    this.hazards.clear();
+    this.fx.clear();
     this.particles.clear();
     this.trapdoor = null;
     this.enemySlowT = 0;
-    this.bombs = [];
     const startSkill = this.player.activeSkillId ? SKILL_BY_ID[this.player.activeSkillId] : undefined;
     if (startSkill) this.player.skillCharge = startSkill.chargeMax;
 
@@ -450,6 +556,8 @@ export class World {
   startRoomTry(chapterId: string, cat: 'normal' | 'boss', index: number): void {
     this.labyrinth = null;
     this.labRoom = null;
+    this.hub = null;
+    this.hubRoom = null;
     this.computeRoom();
     // A kiválasztott pályát közvetlenül az id-ja alapján oldjuk fel — így a
     // kampányon kívüli (dungeon/különleges) pályák is tesztelhetők a saját
@@ -463,14 +571,12 @@ export class World {
     this._theme = chapter.theme;
     this.dungeon = new Dungeon(this.floor);
     this.player.reset(this.cx, this.cy);
-    this.tears = [];
-    this.ebullets = [];
-    this.hazards = [];
-    this.floaters = [];
+    this.entities.clear();
+    this.hazards.clear();
+    this.fx.clear();
     this.particles.clear();
     this.trapdoor = null;
     this.enemySlowT = 0;
-    this.bombs = [];
     const startSkill = this.player.activeSkillId ? SKILL_BY_ID[this.player.activeSkillId] : undefined;
     if (startSkill) this.player.skillCharge = startSkill.chargeMax;
 
@@ -515,11 +621,9 @@ export class World {
     this._theme = resolveLevel(this.floor).chapter.theme;
     this.audio.stairs();
     this.dungeon = new Dungeon(this.floor);
-    this.tears = [];
-    this.ebullets = [];
-    this.hazards = [];
+    this.entities.clear();
+    this.hazards.clear();
     this.trapdoor = null;
-    this.bombs = [];
     this.player.slowT = 0; // a gázzsák lassítása nem visz át a következő szintre
     this.player.placeAtCenter(this.cx, this.cy);
     this.spawnRoomContents(this.currentRoom);
@@ -554,11 +658,7 @@ export class World {
     this.spawnDecorations(room);
     if (room.type === 'start') {
       room.cleared = true;
-      // A kezdőszobába egy labirintus-KAPU kerül (ha van labirintus különleges
-      // pálya) — innen a játékos azonnal kipróbálhatja a labirintust.
-      room.gate = CHAPTERS.some((c) => c.labyrinth) ? { col: 0.15, row: 0 } : null;
-      // Dungeon-kapu a JOBB sarokba (a labirintus-kapu tükörképe a bal sarokból).
-      room.dungeonGate = { col: 11.85, row: 0 };
+      // A hub-terem adja a mód-választó portálokat; a story kezdőszobában nincs kapu.
       return;
     }
 
@@ -634,10 +734,8 @@ export class World {
 
   enterRoom(dir: Dir): void {
     const next = this.dungeon.move(dir);
-    this.tears = [];
-    this.ebullets = [];
-    this.hazards = [];
-    this.bombs = [];
+    this.entities.clear();
+    this.hazards.clear();
 
     const rc = this._room;
     const r = this.player.r;
@@ -671,7 +769,7 @@ export class World {
     const p = this.player;
     if (!p.alive || this._cheats.invincible) return;
     if (!dot && p.invuln > 0) return; // a DoT figyelmen kívül hagyja az i-frame-et
-    // a MÉLYSÉG globálisan növeli a bejövő sebzést (Isaac-minta) — egyetlen helyen,
+    // a MÉLYSÉG globálisan növeli a bejövő sebzést (roguelike-minta) — egyetlen helyen,
     // így MINDEN forrás (lövedék/érintés/talaj-veszély) egységesen skálázódik. A
     // bossok és a játékos saját robbanása `raw`-val kikerülik (fix sebzés).
     const dealt = raw ? amount : scaleIncomingDamage(amount, this.floor);
@@ -781,7 +879,7 @@ export class World {
     this.audio.splat();
   }
 
-  private dropPickup(x: number, y: number): void {
+  dropPickup(x: number, y: number): void {
     // A típus a nettó-súlyok arányában (a gate már eldöntötte, hogy esik valami).
     const n = dropConfig.nets;
     const total = netSum();
@@ -795,7 +893,7 @@ export class World {
   }
 
   /** Több érme szétszórása egy pont körül (szerencse-kő zsákmánya). */
-  private dropCoins(x: number, y: number, n: number): void {
+  dropCoins(x: number, y: number, n: number): void {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * TAU;
       const d = Math.random() * 24;
@@ -1262,97 +1360,13 @@ export class World {
     }
     // tárgyak szétrobbantása a robbanás körüli cellákban (a víz megmarad).
     // TNT: 3×3 blokk; bomba: csak a + alak (a robbanás cellája + 4 szomszéd).
-    this.destroyObstaclesAround(b.x, b.y, b.type === 'tnt' ? 1.5 : 1.1);
+    this.collision.destroyObstaclesAround(b.x, b.y, b.type === 'tnt' ? 1.5 : 1.1);
     // a játékost is sebzi, ha a sugáron belül van (SAJÁT bomba → fix, nem skálázódik)
     if (this.player.alive && dist2(this.player.x, this.player.y, b.x, b.y) <= r2) {
       this.damagePlayer(HP.heart, 'hurt', true);
     }
   }
 
-  // ---- Talaj-veszélyek ----
-  private updateHazards(dt: number): void {
-    const p = this.player;
-    for (let i = this.hazards.length - 1; i >= 0; i--) {
-      const h = this.hazards[i]!;
-      h.age += dt;
-      h.life -= dt;
-      if (h.tick > 0) h.tick -= dt;
-
-      if (h.life <= 0) {
-        if (h.kind === 'mine') this.explodeMine(h);
-        this.hazards.splice(i, 1);
-        continue;
-      }
-
-      if (h.kind === 'poison' || h.kind === 'fire') {
-        const armed = h.age >= (h.arm ?? 0); // telegraf alatt csak látszik, nem sebez
-        const reach = h.r + p.r * 0.4;
-        if (armed && p.alive && dist2(p.x, p.y, h.x, h.y) < reach * reach && h.tick <= 0) {
-          h.tick = 0.5;
-          this.damagePlayer(HP.half, h.kind === 'fire' ? 'burn' : 'acid');
-          this.particles.spawn(p.x, p.y, h.kind === 'fire' ? '#ff7a1e' : '#8fbf4a', 5, 120, 0.3);
-        }
-      } else if (h.kind === 'mine') {
-        // ha a játékos RÁLÉP egy már beélesedett aknára, hamarabb robban — de van
-        // egy türelmi idő a becsapódás után, hogy a rád dobott bomba elől el lehessen futni
-        if (p.alive && h.age > 0.7 && dist2(p.x, p.y, h.x, h.y) < (p.r + 12) ** 2 && h.life > 0.4) h.life = 0.4;
-      }
-      // fog: nem sebez, csak a látást zavarja (lásd drawHazards)
-    }
-  }
-
-  private explodeMine(h: Hazard): void {
-    this.audio.boom();
-    this.addShake(12);
-    this.particles.spawn(h.x, h.y, '#ff8a3a', 26, 340, 0.6);
-    this.particles.spawn(h.x, h.y, '#ffd36a', 14, 260, 0.5);
-    this.particles.spawn(h.x, h.y, '#777777', 14, 200, 0.7);
-    const r2 = h.r * h.r;
-    if (this.player.alive && dist2(this.player.x, this.player.y, h.x, h.y) <= r2) {
-      this.damagePlayer(HP.heart);
-    }
-    // tárgyak szétrobbantása (mint a sima bomba: + alak; a víz megmarad)
-    this.destroyObstaclesAround(h.x, h.y, 1.1);
-  }
-
-  /**
-   * Bomba/akna: a robbanás cellája körüli tömör, nem bombabiztos tárgyak elpusztítása.
-   * A hatókör RÁCS-cellákban mérődik (nem pixelben), így független a szoba méretétől és
-   * pontosan kiszámítható: reach 1.1 → + alak (5 cella), reach 1.5 → 3×3 blokk (9 cella).
-   */
-  private destroyObstaclesAround(x: number, y: number, reach: number): void {
-    const rc = this._room;
-    const ecol = Math.floor((x - rc.x) / (rc.w / GRID.W));
-    const erow = Math.floor((y - rc.y) / (rc.h / GRID.H));
-    const reach2 = reach * reach;
-    this.currentRoom.obstacles = this.currentRoom.obstacles.filter((o) => {
-      const def = OBSTACLES[o.kind];
-      if (!def.solid || def.bombProof) return true; // víz nem robban
-      const dc = o.col - ecol;
-      const dr = o.row - erow;
-      if (dc * dc + dr * dr <= reach2) {
-        const c = this.cellCenter(o.col, o.row);
-        this.particles.spawn(c.x, c.y, this.obstacleColor(o.kind), 8, 180, 0.45);
-        if (o.kind === 'crate' && Math.random() < CRATE_DROP_CHANCE) this.dropPickup(c.x, c.y);
-        else if (o.kind === 'luckrock') {
-          // szerencse-kő: garantált érme-zsákmány + arany szikrák
-          this.particles.spawn(c.x, c.y, '#ffd36a', 16, 220, 0.6);
-          this.dropCoins(c.x, c.y, randi(3, 5));
-        } else if (o.kind === 'rock' && Math.random() < ROCK_COIN_CHANCE) {
-          // kő alatt OLYKOR arany lapul — bombázásra LEGFELJEBB 1 érme esik
-          this.particles.spawn(c.x, c.y, '#ffd36a', 10, 200, 0.5);
-          this.dropCoins(c.x, c.y, 1);
-        }
-        return false;
-      }
-      return true;
-    });
-  }
-
-  /** Egy tárgytípus alap-színe (szilánkokhoz; a kő a fejezet témáját követi). */
-  private obstacleColor(kind: ObstacleKind): string {
-    return obstacleShardColor(kind, this._theme);
-  }
 
   // ---- Kullancsok (felmászott élősködők) ----
   /** A felmászott kullancsokat leveszi a szobából és a játékosra teszi (megmarad szobák között). */
@@ -1431,108 +1445,11 @@ export class World {
     }
   }
 
-  private drawHazards(ctx: CanvasRenderingContext2D): void {
-    const t = performance.now() / 1000;
-    for (const h of this.hazards) {
-      if (h.kind === 'fog') continue; // a köd külön, az entitások fölé rajzolódik
-
-      // becsapódó AoE telegraf: amíg élesedik, csak FIGYELMEZTETŐ zóna látszik (nem sebez)
-      const arm = h.arm ?? 0;
-      if (arm > 0 && h.age < arm) {
-        const k = clamp(h.age / arm, 0, 1); // 0 → 1 a becsapódásig
-        ctx.save();
-        ctx.globalAlpha = 0.12 + 0.14 * k; // halvány kitöltés a cél-sugárban
-        ctx.fillStyle = '#ff7a2a';
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, h.r, 0, TAU);
-        ctx.fill();
-        ctx.globalAlpha = 0.45 + 0.4 * (0.5 + 0.5 * Math.sin(t * 14)); // lüktető külső gyűrű
-        ctx.strokeStyle = '#ffd23a';
-        ctx.lineWidth = 2.5;
-        ctx.setLineDash([6, 7]);
-        ctx.lineDashOffset = -t * 22;
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, h.r, 0, TAU);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.globalAlpha = 0.7; // záródó belső gyűrű → a becsapódás közeledte
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, h.r * (1 - k * 0.75), 0, TAU);
-        ctx.stroke();
-        ctx.restore();
-        continue;
-      }
-
-      const grow = clamp(h.age / 0.3, 0, 1);
-      const fade = clamp(h.life / 0.6, 0, 1); // utolsó 0.6 mp-ben halványul
-      const r = h.r * grow;
-      ctx.save();
-      if (h.kind === 'poison') {
-        ctx.globalAlpha = 0.55 * fade;
-        const g = ctx.createRadialGradient(h.x, h.y, r * 0.2, h.x, h.y, r);
-        g.addColorStop(0, '#bfff6a');
-        g.addColorStop(0.6, '#6f9f2a');
-        g.addColorStop(1, 'rgba(50,80,18,0)');
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.ellipse(h.x, h.y, r, r * 0.66, 0, 0, TAU);
-        ctx.fill();
-        ctx.globalAlpha = 0.6 * fade;
-        ctx.fillStyle = '#dcff7a';
-        for (let i = 0; i < 3; i++) {
-          const a = t * 1.6 + i * 2.1 + h.x;
-          ctx.beginPath();
-          ctx.arc(h.x + Math.cos(a) * r * 0.4, h.y + Math.sin(a * 1.3) * r * 0.26, 1.6 + (Math.sin(t * 4 + i) * 0.5 + 0.5) * 2, 0, TAU);
-          ctx.fill();
-        }
-      } else if (h.kind === 'fire') {
-        ctx.globalAlpha = 0.8 * fade;
-        const wob = 1 + Math.sin(t * 12 + h.x) * 0.14;
-        for (const [rr, c] of [[r, '#7a1500'], [r * 0.72, '#ff5a1e'], [r * 0.44, '#ffb13a'], [r * 0.2, '#fff3b0']] as const) {
-          ctx.fillStyle = c;
-          ctx.beginPath();
-          ctx.ellipse(h.x, h.y - (r - rr) * 0.4, rr * wob, rr * 0.8 * wob, 0, 0, TAU);
-          ctx.fill();
-        }
-      } else {
-        // mine — robbanási kör + ketyegő mag
-        const blink = h.life < 0.6 ? (Math.sin(h.life * 42) > 0 ? 1 : 0.25) : 0.5 + Math.sin(t * 6) * 0.3;
-        ctx.globalAlpha = 0.1;
-        ctx.fillStyle = '#ff5a3a';
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, h.r, 0, TAU);
-        ctx.fill();
-        ctx.globalAlpha = 0.55;
-        ctx.strokeStyle = '#ff5a3a';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([5, 6]);
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, h.r, 0, TAU);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#26221a';
-        ctx.strokeStyle = '#15120c';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, 10, 0, TAU);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = `rgba(255,90,40,${blink})`;
-        ctx.shadowColor = '#ff5a2a';
-        ctx.shadowBlur = 12 * blink;
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, 4.5, 0, TAU);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-      }
-      ctx.restore();
-    }
-  }
-
   // ---- Frissítés ----
   update(dt: number): void {
+    if (this.hub) { this.updateHub(dt); return; } // hub: harc nélküli mód-választó
     this.computeRoom();
+    this.collision.indexEnemies(); // ellenfél-térrács erre a frame-re (lövedék-broad-phase)
     this.runStats.tick(dt);
     if (this.transition > 0) this.transition -= dt;
     if (this.enemyFreezeT > 0) this.enemyFreezeT -= dt;
@@ -1641,7 +1558,7 @@ export class World {
     this.updateAttachedTicks(dt);
 
     // talaj-veszélyek (méreg / tűz / köd / akna)
-    this.updateHazards(dt);
+    this.hazards.update(dt);
 
     // pickupok
     const room = this.currentRoom;
@@ -1730,22 +1647,13 @@ export class World {
       }
     }
 
-    // részecskék + lebegő szövegek
+    // részecskék + lebegő szövegek + képernyőrázás lecsengése
     this.particles.update(dt);
-    for (let i = this.floaters.length - 1; i >= 0; i--) {
-      const f = this.floaters[i]!;
-      f.y += f.vy * dt;
-      // sebzésszám (max van): felpattan, majd visszaível és a sodródás lecseng
-      if (f.max !== undefined) {
-        f.x += (f.vx ?? 0) * dt;
-        f.vy += 150 * dt;
-        if (f.vx) f.vx *= 0.9;
-      }
-      f.life -= dt;
-      if (f.life <= 0) this.floaters.splice(i, 1);
-    }
+    this.fx.update(dt);
 
-    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 38);
+    // dinamikus zene: élő ellenfél = harc (a labirintusban is, ahol a `cleared` mást jelent)
+    const inCombat = this.currentRoom.enemies.length > 0;
+    this.audio.setMusicScene(inCombat ? 1 : 0, inCombat && this.currentRoom.type === 'boss');
 
     // labirintus: a kijárat elérése → rövid „teljesítve" felvillanás, majd kilépés
     if (this.labyrinth) {
@@ -1762,6 +1670,10 @@ export class World {
         recordLabClear(this.labChapterId, this.runStats.lab);
         this.runStats.labsCleared++;
         this.audio.door();
+      } else if (this.player.alive && (this.labTimeLeft -= dt) <= 0) {
+        // lejárt a visszaszámláló: a futás véget ér (mintha elesett volna)
+        this.labTimeLeft = 0;
+        this.killPlayer();
       }
     }
   }
@@ -1770,7 +1682,42 @@ export class World {
   updateAmbient(dt: number): void {
     this.computeRoom();
     this.particles.update(dt);
-    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 38);
+    this.fx.tickShake(dt);
+  }
+
+  /**
+   * Hub-terem frissítése: játékos-mozgás (fal-ütközéssel, ajtó/szobaváltás
+   * NÉLKÜL — lásd hasNeighbor) + a portál-közelség kezelése. NYITOTT portálra
+   * lépve a Game indítja a módot; ZÁRT portál „hamarosan" jelzést ad. A
+   * `hubArmed` biztosítja, hogy lelépésig egyszer süljön el.
+   */
+  private updateHub(dt: number): void {
+    this.computeRoom();
+    this.player.update(dt, this);
+    this.particles.update(dt);
+    // lebegő szövegek lecsengése (a „hamarosan" jelzés) + képernyőrázás
+    this.fx.update(dt);
+    this.audio.setMusicScene(0); // hub: nyugodt drone (nincs harc)
+
+    let near = false;
+    for (const p of this.hub!) {
+      const c = this.cellCenter(p.col, p.row);
+      if (dist2(c.x, c.y, this.player.x, this.player.y) < (this.player.r + 24) ** 2) {
+        near = true;
+        if (this.hubArmed) {
+          this.hubArmed = false;
+          if (p.locked) {
+            this.addFloater(c.x, c.y - 38, 'COMING SOON', '#cdbb9a');
+            this.audio.denied();
+          } else {
+            this.audio.stairs();
+            this.onHubChoice?.(p.id);
+          }
+        }
+        break;
+      }
+    }
+    if (!near) this.hubArmed = true; // lelépett minden portálról → újra élesedik
   }
 
   private computeRoom(): void {
@@ -1806,7 +1753,7 @@ export class World {
   }
 
   // ---- Rács / akadályok ----
-  private cellCenter(col: number, row: number): { x: number; y: number } {
+  cellCenter(col: number, row: number): { x: number; y: number } {
     const rc = this._room;
     return {
       x: rc.x + (col + 0.5) * (rc.w / GRID.W),
@@ -1814,154 +1761,47 @@ export class World {
     };
   }
 
-  private cellRect(col: number, row: number): Rect {
+  cellRect(col: number, row: number): Rect {
     const rc = this._room;
     const cw = rc.w / GRID.W;
     const ch = rc.h / GRID.H;
     return { x: rc.x + col * cw, y: rc.y + row * ch, w: cw, h: ch };
   }
 
-  /**
-   * Egy sugár hossza a forrástól adott szögben az ELSŐ akadályig (kő), vagy
-   * `maxLen`-ig, ha nincs útban semmi. Lézerekhez: így a kövek mögé el lehet bújni.
-   */
+  // ---- Ütközés/geometria → CollisionSystem (facade; az entitások ezeket hívják) ----
+  /** Sugár–akadály távolság (lásd CollisionSystem). */
   rayObstacleDistance(x: number, y: number, ang: number, maxLen: number): number {
-    const dx = Math.cos(ang), dy = Math.sin(ang);
-    const step = 7;
-    for (let s = step; s < maxLen; s += step) {
-      if (this.isBlocked(x + dx * s, y + dy * s)) return Math.max(0, s - step);
-    }
-    return maxLen;
-  }
-
-  /** A pontban lévő TÖMÖR tárgy (mozgást/lövést blokkol), vagy null. A víz nem az. */
-  private solidObstacleAt(x: number, y: number): Obstacle | null {
-    for (const o of this.currentRoom.obstacles) {
-      if (!OBSTACLES[o.kind].solid) continue;
-      const r = this.cellRect(o.col, o.row);
-      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return o;
-    }
-    return null;
+    return this.collision.rayObstacleDistance(x, y, ang, maxLen);
   }
 
   /** Igaz, ha a pont tömör tárgyon van (könny/lövedék-vágáshoz, látáshoz). */
   isBlocked(x: number, y: number): boolean {
-    if (this.labyrinth) {
-      const TILE = ROOM.TILE;
-      return this.labWallCell(Math.floor(x / TILE), Math.floor(y / TILE));
-    }
-    return this.solidObstacleAt(x, y) !== null;
+    return this.collision.isBlocked(x, y);
   }
 
-  /**
-   * Könnycsepp becsapódott: ha tömör tárgyba ütközött, igaz (a könny elhal).
-   * A törhető ládát közben sebzi, és szétlöveti, ha elfogyott az életereje.
-   */
+  /** Könnycsepp becsapódott (lásd CollisionSystem) — törhető láda sebzése/szétlövése is. */
   shotHitObstacle(x: number, y: number, dmg: number): boolean {
-    if (this.labyrinth) return this.isBlocked(x, y); // maze-fal: a lövedék elhal (nem repül át)
-    const o = this.solidObstacleAt(x, y);
-    if (!o) return false;
-    if (OBSTACLES[o.kind].breakable) {
-      o.hp = (o.hp ?? OBSTACLES[o.kind].hp) - dmg;
-      const c = this.cellCenter(o.col, o.row);
-      if (o.hp <= 0) this.breakCrate(o, c.x, c.y);
-      else {
-        this.particles.spawn(x, y, '#c89a5a', 5, 130, 0.3);
-        this.audio.hitEnemy();
-      }
-    }
-    return true;
+    return this.collision.shotHitObstacle(x, y, dmg);
   }
 
-  /** Láda szétlövése: eltávolítás, szilánkok, és esély zsákmányra. */
-  private breakCrate(o: Obstacle, x: number, y: number): void {
-    this.currentRoom.obstacles = this.currentRoom.obstacles.filter((it) => it !== o);
-    this.particles.spawn(x, y, '#a9743a', 12, 200, 0.5);
-    this.particles.spawn(x, y, '#6e4a22', 8, 150, 0.45);
-    this.audio.splat();
-    if (Math.random() < CRATE_DROP_CHANCE) this.dropPickup(x, y);
-  }
-
-  /** Kör alakú entitás kitolása a tömör tárgyakból (kör–AABB feloldás). */
+  /** Kör alakú entitás kitolása a tömör tárgyakból / labirintus-falból (lásd CollisionSystem). */
   resolveCircle(o: { x: number; y: number; r: number }): void {
-    if (this.labyrinth) { this.resolveLabWalls(o); return; }
-    for (const ob of this.currentRoom.obstacles) {
-      if (!OBSTACLES[ob.kind].solid) continue;
-      const cr = this.cellRect(ob.col, ob.row);
-      const px = clamp(o.x, cr.x, cr.x + cr.w);
-      const py = clamp(o.y, cr.y, cr.y + cr.h);
-      const dx = o.x - px;
-      const dy = o.y - py;
-      const d2 = dx * dx + dy * dy;
-      if (d2 >= o.r * o.r) continue;
-      if (d2 > 1e-6) {
-        const d = Math.sqrt(d2);
-        const push = o.r - d;
-        o.x += (dx / d) * push;
-        o.y += (dy / d) * push;
-      } else {
-        // a középpont a cellán belül: kitolás a legkisebb behatolás felé
-        const left = o.x - cr.x;
-        const right = cr.x + cr.w - o.x;
-        const top = o.y - cr.y;
-        const bottom = cr.y + cr.h - o.y;
-        const minX = Math.min(left, right);
-        const minY = Math.min(top, bottom);
-        if (minX < minY) o.x += left < right ? -(left + o.r) : right + o.r;
-        else o.y += top < bottom ? -(top + o.r) : bottom + o.r;
-      }
-    }
-  }
-
-  /** Kör alakú entitás kitolása a labirintus fal-tile-jaiból (kör–AABB, a szomszéd cellákra). */
-  private resolveLabWalls(o: { x: number; y: number; r: number }): void {
-    const TILE = ROOM.TILE;
-    const r = o.r;
-    const minC = Math.floor((o.x - r) / TILE);
-    const maxC = Math.floor((o.x + r) / TILE);
-    const minR = Math.floor((o.y - r) / TILE);
-    const maxR = Math.floor((o.y + r) / TILE);
-    for (let row = minR; row <= maxR; row++) {
-      for (let col = minC; col <= maxC; col++) {
-        if (!this.labWallCell(col, row)) continue;
-        const cx = col * TILE;
-        const cy = row * TILE;
-        const px = clamp(o.x, cx, cx + TILE);
-        const py = clamp(o.y, cy, cy + TILE);
-        const dx = o.x - px;
-        const dy = o.y - py;
-        const d2 = dx * dx + dy * dy;
-        if (d2 >= r * r) continue;
-        if (d2 > 1e-6) {
-          const d = Math.sqrt(d2);
-          const push = r - d;
-          o.x += (dx / d) * push;
-          o.y += (dy / d) * push;
-        } else {
-          // a középpont a fal-cellán belül: kitolás a legkisebb behatolás felé
-          const left = o.x - cx;
-          const right = cx + TILE - o.x;
-          const top = o.y - cy;
-          const bottom = cy + TILE - o.y;
-          if (Math.min(left, right) < Math.min(top, bottom)) o.x += left < right ? -(left + r) : right + r;
-          else o.y += top < bottom ? -(top + r) : bottom + r;
-        }
-      }
-    }
+    this.collision.resolveCircle(o);
   }
 
   // ---- Kirajzolás ----
   render(ctx: CanvasRenderingContext2D): void {
+    if (this.hub) { this.renderHub(ctx); return; }
     if (this.labyrinth) { this.renderLabyrinth(ctx); return; }
     ctx.save();
-    if (this.shake > 0) ctx.translate(rand(-this.shake, this.shake) * 0.5, rand(-this.shake, this.shake) * 0.5);
+    if (this.fx.shake > 0) ctx.translate(rand(-this.fx.shake, this.fx.shake) * 0.5, rand(-this.fx.shake, this.fx.shake) * 0.5);
 
     ctx.fillStyle = '#0a0810';
     ctx.fillRect(0, 0, this.engine.width, this.engine.height);
 
     this.drawRoom(ctx);
     this.drawObstacles(ctx);
-    this.drawHazards(ctx);
+    this.hazards.draw(ctx);
     this.particles.draw(ctx);
 
     const room = this.currentRoom;
@@ -1971,6 +1811,7 @@ export class World {
     if (room.gate) this.drawGate(ctx, room.gate);
     if (room.dungeonGate) this.drawDungeonGate(ctx, room.dungeonGate);
     if (this.trapdoor) this.drawTrapdoor(ctx);
+    this.drawProjectileGlow(ctx);
     for (const bomb of this.bombs) bomb.draw(ctx);
 
     const bulletT = performance.now() / 1000;
@@ -1987,13 +1828,14 @@ export class World {
     if (room.anim) room.anim(ctx, this._room, performance.now() / 1000);
 
     // ködfelhők az entitások fölött (ténylegesen eltakarják, ami alattuk van)
-    this.drawFogHazards(ctx);
+    this.hazards.drawFog(ctx);
 
-    // sötétség / látótáv (a játékos körüli megvilágítás)
-    this.drawFog(ctx);
+    // 2D fény-térkép: ambient sötétség + dinamikus lámpák (multiply) — a látótáv
+    // (sight) most a játékos-fáklya sugarát skálázza, így ez a régi drawFog-ot is kiváltja
+    this.applyLighting(ctx);
 
     // lebegő szövegek
-    this.drawFloaters(ctx);
+    this.fx.draw(ctx);
 
     // teszt-aréna: minden (nem-boss) ellenfél fölött a TÉNYLEGES sebzése
     if (this.sandbox) this.drawSandboxLabels(ctx);
@@ -2029,31 +1871,61 @@ export class World {
   }
 
   /** Lebegő szövegek (sebzésszámok + értesítők) — világ-koordinátában rajzolva. */
-  private drawFloaters(ctx: CanvasRenderingContext2D): void {
-    ctx.textAlign = 'center';
-    ctx.lineJoin = 'round';
-    for (const f of this.floaters) {
-      if (f.max !== undefined) {
-        // sebzésszám: gyors „pop” az elején, finom zsugorodás a végén, sötét kontúr
-        const age = f.max - f.life;
-        const pop = age < 0.1 ? 0.5 + 5 * age : 1; // 0.5→1.0 az első 0.1 mp-ben
-        const scale = pop * (0.85 + 0.15 * clamp(f.life / 0.3, 0, 1));
-        ctx.globalAlpha = clamp(f.life / 0.3, 0, 1);
-        ctx.font = `${((f.size ?? 13) * scale).toFixed(1)}px system-ui`;
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-        ctx.strokeText(f.text, f.x, f.y);
-        ctx.fillStyle = f.color;
-        ctx.fillText(f.text, f.x, f.y);
-      } else {
-        ctx.globalAlpha = clamp(f.life, 0, 1);
-        ctx.font = 'bold 15px system-ui';
-        ctx.fillStyle = f.color;
-        ctx.fillText(f.text, f.x, f.y);
-      }
+  // ---- Hub (mód-választó) kirajzolása ----
+  /**
+   * Hub-render: egyetlen, normál méretű terem (ajtók nélkül), középen a rúna-
+   * glyph + játékos, a négy fal felé egy-egy portál. A zárt portálokra lakat-
+   * fátyol kerül. A teljes-képernyős látótáv-sötétséget (drawFog) SZÁNDÉKOSAN
+   * kihagyjuk, hogy mind a négy portál látszódjon.
+   */
+  private renderHub(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    if (this.fx.shake > 0) ctx.translate(rand(-this.fx.shake, this.fx.shake) * 0.5, rand(-this.fx.shake, this.fx.shake) * 0.5);
+
+    ctx.fillStyle = '#0a0810';
+    ctx.fillRect(0, 0, this.engine.width, this.engine.height);
+
+    const rc = this._room;
+    const W = ROOM.WALL;
+    const th = this._theme;
+
+    // padló (gyorsítótárból) + szél-árnyalat
+    this.drawCachedFloor(ctx);
+    const g = ctx.createRadialGradient(this.cx, this.cy, rc.h * 0.2, this.cx, this.cy, rc.w * 0.7);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, `rgba(0,0,0,${th.vignette})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+
+    // falak (AJTÓK nélkül — a hub zárt terem)
+    ctx.fillStyle = th.wall;
+    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, W);
+    ctx.fillRect(rc.x - W, rc.y + rc.h, rc.w + W * 2, W);
+    ctx.fillRect(rc.x - W, rc.y, W, rc.h);
+    ctx.fillRect(rc.x + rc.w, rc.y, W, rc.h);
+    ctx.strokeStyle = th.wallEdge;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(rc.x - 2, rc.y - 2, rc.w + 4, rc.h + 4);
+    ctx.fillStyle = th.wallTop;
+    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, 5);
+
+    // középső rúna-glyph (a játékos „leszúrási pontja")
+    drawHubGlyph(ctx, this.cx, this.cy, th.accent);
+    this.particles.draw(ctx);
+
+    // portálok
+    const t = performance.now() / 1000;
+    for (const p of this.hub!) {
+      const c = this.cellCenter(p.col, p.row);
+      drawHubPortal(ctx, c.x, c.y, th.accent, p.id, p.locked, t);
     }
-    ctx.globalAlpha = 1;
-    ctx.textAlign = 'left';
+
+    if (this.player.alive) this.player.draw(ctx);
+
+    drawHubTitle(ctx, this.engine.width / 2, Math.max(16, this._room.y - ROOM.WALL - 34));
+    this.fx.draw(ctx);
+
+    ctx.restore();
   }
 
   /**
@@ -2076,7 +1948,7 @@ export class World {
     ctx.fillRect(0, 0, this.engine.width, this.engine.height);
 
     ctx.save();
-    if (this.shake > 0) ctx.translate(rand(-this.shake, this.shake) * 0.5, rand(-this.shake, this.shake) * 0.5);
+    if (this.fx.shake > 0) ctx.translate(rand(-this.fx.shake, this.fx.shake) * 0.5, rand(-this.fx.shake, this.fx.shake) * 0.5);
     ctx.beginPath();
     ctx.rect(box.x, box.y, box.w, box.h);
     ctx.clip();
@@ -2090,14 +1962,15 @@ export class World {
     const c1 = Math.min(lab.W - 1, Math.floor((camX + box.w) / TILE));
     const r0 = Math.max(0, Math.floor(camY / TILE));
     const r1 = Math.min(lab.H - 1, Math.floor((camY + box.h) / TILE));
-    this.drawLabWalls(ctx, c0, c1, r0, r1);
-    this.drawLabExit(ctx);
+    drawLabWalls(ctx, th, c0, c1, r0, r1, (col, row) => this.collision.labWallCell(col, row));
+    drawLabExit(ctx, lab.exit.col, lab.exit.row, th.accent);
 
     // entitások — a teljes motor, világ-koordinátában (ezért működik a harc)
-    this.drawHazards(ctx);
+    this.hazards.draw(ctx);
     this.particles.draw(ctx);
     const room = this.currentRoom;
     for (const pk of room.pickups) pk.draw(ctx);
+    this.drawProjectileGlow(ctx);
     for (const bomb of this.bombs) bomb.draw(ctx);
     const bulletT = performance.now() / 1000;
     for (const b of this.ebullets) drawBullet(ctx, b, bulletT);
@@ -2107,170 +1980,148 @@ export class World {
     if (this.player.alive) this.player.draw(ctx);
     this.drawFamiliars(ctx);
     this.drawAttachedTicks(ctx);
-    this.drawFogHazards(ctx);
-    this.drawFloaters(ctx);
+    this.hazards.drawFog(ctx);
+    this.fx.draw(ctx);
 
     ctx.restore();
 
-    this.drawLabFog(ctx, ox, oy);
-    this.drawLabFrame(ctx);
-    this.drawLabOverlay(ctx);
-  }
-
-  /** Labirintus fal-tile-ok a látható ablakra (felső világos perem / alsó él-árnyék). */
-  private drawLabWalls(ctx: CanvasRenderingContext2D, c0: number, c1: number, r0: number, r1: number): void {
-    const th = this._theme;
-    const TILE = ROOM.TILE;
-    for (let row = r0; row <= r1; row++) {
-      for (let col = c0; col <= c1; col++) {
-        if (!this.labWallCell(col, row)) continue;
-        const x = col * TILE;
-        const y = row * TILE;
-        ctx.fillStyle = th.wall;
-        ctx.fillRect(x, y, TILE, TILE);
-        if (!this.labWallCell(col, row - 1)) { // felső világos perem, ha fölötte folyosó
-          ctx.fillStyle = th.wallTop;
-          ctx.fillRect(x, y, TILE, 6);
-        }
-        if (!this.labWallCell(col, row + 1)) { // alsó él-árnyék, ha alatta folyosó
-          ctx.fillStyle = th.wallEdge;
-          ctx.fillRect(x, y + TILE - 5, TILE, 5);
-        }
-      }
-    }
-  }
-
-  /** A labirintus kijárata (csapóajtó) — lüktető akcentus + ▼ jel. */
-  private drawLabExit(ctx: CanvasRenderingContext2D): void {
-    const lab = this.labyrinth!;
-    const TILE = ROOM.TILE;
-    const x = lab.exit.col * TILE;
-    const y = lab.exit.row * TILE;
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 250);
-    ctx.save();
-    ctx.globalAlpha = 0.35 + 0.35 * pulse;
-    ctx.fillStyle = this._theme.accent;
-    ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = '#10100a';
-    ctx.font = '700 30px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('▼', x + TILE / 2, y + TILE / 2 + 2);
-    ctx.textAlign = 'start';
-    ctx.textBaseline = 'alphabetic';
-    ctx.restore();
-  }
-
-  /** A játékos körüli sötétség (látótáv) — képernyő-térben, a pálya-dobozra vágva. */
-  private drawLabFog(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
-    const s = this.player.sight;
-    if (s >= 0.999) return;
-    const box = this.labBox;
-    const px = ox + this.player.x;
-    const py = oy + this.player.y;
-    const maxR = Math.hypot(box.w, box.h) * 0.5;
-    const litR = Math.max(70, s * maxR);
+    // 2D fény-térkép (lámpa mód) a labirintusban is: ugyanaz a sötétség + a
+    // játékos-fáklya (a `sight` skálázza a sugarát), mint a normál pályán. A
+    // kamera-eltolást (ox,oy) átadjuk, és a pálya-dobozra vágjuk. Egyszerű kör-
+    // fény (nincs maze-fal árnyékvetés), de a sötétség és a látótáv azonos.
     ctx.save();
     ctx.beginPath();
     ctx.rect(box.x, box.y, box.w, box.h);
     ctx.clip();
-    const g = ctx.createRadialGradient(px, py, litR * 0.5, px, py, litR);
-    g.addColorStop(0, 'rgba(3,2,7,0)');
-    g.addColorStop(0.75, 'rgba(3,2,7,0.55)');
-    g.addColorStop(1, 'rgba(3,2,7,0.93)');
-    ctx.fillStyle = g;
-    ctx.fillRect(box.x, box.y, box.w, box.h);
+    this.applyLighting(ctx, ox, oy, true);
     ctx.restore();
+
+    drawLabFrame(ctx, box, th);
+    drawLabOverlay(ctx, box, this.labWon);
   }
 
-  /** A pálya-keret (fal-szegély) a doboz körül — a normál pálya kinézete. */
-  private drawLabFrame(ctx: CanvasRenderingContext2D): void {
-    const th = this._theme;
-    const box = this.labBox;
-    const W = ROOM.WALL;
-    ctx.fillStyle = th.wall;
-    ctx.fillRect(box.x - W, box.y - W, box.w + 2 * W, W);
-    ctx.fillRect(box.x - W, box.y + box.h, box.w + 2 * W, W);
-    ctx.fillRect(box.x - W, box.y, W, box.h);
-    ctx.fillRect(box.x + box.w, box.y, W, box.h);
-    ctx.fillStyle = th.wallTop;
-    ctx.fillRect(box.x - W, box.y - W, box.w + 2 * W, 5);
-    ctx.strokeStyle = th.wallEdge;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(box.x - 1, box.y - 1, box.w + 2, box.h + 2);
-  }
-
-  /** Alsó tipp + „LABYRINTH COMPLETE" felvillanás. */
-  private drawLabOverlay(ctx: CanvasRenderingContext2D): void {
-    const box = this.labBox;
-    ctx.save();
-    ctx.font = '600 14px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(243, 226, 191, 0.85)';
-    ctx.textAlign = 'center';
-    ctx.fillText('WASD: move · shoot · ESC: back · find the ▼ exit', box.x + box.w / 2, box.y + box.h + 22);
-    ctx.textAlign = 'start';
-
-    if (this.labWon) {
-      const cx = box.x + box.w / 2;
-      const cy = box.y + box.h / 2;
-      ctx.fillStyle = 'rgba(5, 4, 10, 0.6)';
-      ctx.fillRect(box.x, box.y, box.w, box.h);
-      ctx.fillStyle = '#3fd87a';
-      ctx.font = '800 42px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('LABYRINTH COMPLETE!', cx, cy - 8);
-      ctx.textAlign = 'start';
-    }
-    ctx.restore();
+  /** Finom additív fénykör a lövedékekre/könnyekre/bombákra (a látótáv-sötétség változatlan). */
+  private drawProjectileGlow(ctx: CanvasRenderingContext2D): void {
+    if (this.tears.length === 0 && this.ebullets.length === 0 && this.bombs.length === 0) return;
+    const pulse = 0.82 + 0.18 * Math.sin(performance.now() / 110);
+    withGlow(ctx, () => {
+      for (const t of this.tears) drawGlow(ctx, t.x, t.y, t.r * 3.4, t.color, 0.5 * pulse);
+      for (const b of this.ebullets) {
+        const col = b.poison || b.slime ? '#bfff6a' : b.slow ? '#9fdf4a' : '#ff8a5a';
+        drawGlow(ctx, b.x, b.y, (b.r + 4) * 2.6, col, 0.42 * pulse);
+      }
+      for (const bomb of this.bombs) drawGlow(ctx, bomb.x, bomb.y, 30, '#ff7b3a', 0.32 * pulse);
+    });
   }
 
   /**
-   * Ködfelhők — az entitások FÖLÉ rajzolva, hogy ténylegesen eltakarják, ami
-   * alattuk van (ellenfél, lövedék). Több kavargó, részben átlátszó puffból állnak.
+   * 2D fény-térkép összeállítása és kitétele: a játékos-fáklya (a `sight` skálázza
+   * a sugarát), a lövedékek, a bombák és a tűz/láva-veszélyek mint dinamikus
+   * lámpák. A megvilágítatlan rész az ambient felé sötétedik (multiply) — ez adja
+   * a mélységet. A `LightingSystem` egy offscreen buffert + gyorsítótárazott
+   * fény-bélyegzőket használ, így a forró úton nincs gradiens-allokáció.
    */
-  private drawFogHazards(ctx: CanvasRenderingContext2D): void {
-    const t = performance.now() / 1000;
-    for (const h of this.hazards) {
-      if (h.kind !== 'fog') continue;
-      const appear = clamp(h.age / 0.8, 0, 1);   // lassan gomolyog be
-      const fade = clamp(h.life / 1.2, 0, 1);     // lassan oszlik el
-      const r = h.r * (0.65 + 0.35 * appear);
-      const alpha = 0.7 * appear * fade;
-      ctx.save();
-      for (let i = 0; i < 5; i++) {
-        const a = t * 0.3 + i * 1.3 + h.x * 0.2;
-        const ox = h.x + Math.cos(a) * r * 0.3;
-        const oy = h.y + Math.sin(a * 0.8) * r * 0.22;
-        const rr = r * (0.7 + 0.1 * i);
-        const g = ctx.createRadialGradient(ox, oy, rr * 0.15, ox, oy, rr);
-        g.addColorStop(0, `rgba(214,209,232,${alpha})`);
-        g.addColorStop(0.55, `rgba(182,174,208,${alpha * 0.66})`);
-        g.addColorStop(1, 'rgba(170,160,200,0)');
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(ox, oy, rr, 0, TAU);
-        ctx.fill();
+  private applyLighting(ctx: CanvasRenderingContext2D, offX = 0, offY = 0, simple = false): void {
+    const lt = this.lighting;
+    lt.begin();
+    const p = this.player;
+    const mode = this.shadowMode;
+    lt.quality = mode === 'soft' ? 0.5 : 1; // lágy = fél-felbontású, simított perem
+    // a háttér-sötétség (árnyék) is kövesse a látótávot, ne csak a lámpa sugara:
+    // több sight → világosabb árnyék is (egységes, perk-tudatos megvilágítás), így
+    // egy látótáv-perk nem csak egy nagyobb fénybuborékot ad koromsötétben.
+    lt.ambient = clamp(0.5 + (p.sight - 1) * 0.42, 0.3, 0.82);
+    if (p.alive) {
+      const torchR = 280 * clamp(p.sight, 0.4, 1.4);
+      // `simple`: kör-fény árnyékvetés nélkül (a labirintus ezt használja, mert a
+      // takaró-rendszer a normál szobához készült, nem a maze-falakhoz).
+      if (mode === 'off' || simple) {
+        // nincs árnyékvetés: a fáklya sima kör-fény. Kihagyjuk a láthatóság-
+        // számítást (a legdrágább, képkockánkénti lépést) → gyenge gépen olcsó.
+        lt.add(p.x + offX, p.y + offY, torchR, '#ffdca6', 1);
+      } else {
+        // a fényt a látható-poligonra vágjuk → a tárgyak mögött árnyék
+        this.rebuildOccluders();
+        // A szögseprés a legdrágább lépés, ezért gyorsítótárazzuk: csak akkor
+        // számoljuk újra, ha a player a küszöbnél többet mozdult, vagy a
+        // szoba/akadályok változtak. Álló/célzó playernél (harc közben gyakori)
+        // így ingyenes. A pár pixeles eltérést a fáklya lágy pereme elnyeli.
+        const SWEEP_EPS2 = 9; // (3 px)² — ennél kisebb elmozdulásra az előző poligon marad
+        const moved2 = (p.x - this.sweepX) ** 2 + (p.y - this.sweepY) ** 2;
+        if (this.occluderKey !== this.sweepKey || moved2 > SWEEP_EPS2 || this.torchPoly.length < 6) {
+          // csak a fáklya hatósugarán belüli tárgyak kerülnek a sweepbe (a többi
+          // árnyéka úgyis sötétbe esne) — a láthatóság-számítás (négyzetes a
+          // szakaszszámmal) így nem hízik el sok akadálynál.
+          const active = this.activeOccluders;
+          active.length = 0;
+          for (const s of this.roomBox) active.push(s);
+          for (const sh of this.occShapes) {
+            const dx = p.x - sh.cx, dy = p.y - sh.cy, reach = torchR + sh.rad;
+            if (dx * dx + dy * dy <= reach * reach) {
+              for (const s of sh.segs) active.push(s);
+            }
+          }
+          computeVisibility(p.x, p.y, active, this.torchPoly);
+          this.sweepX = p.x; this.sweepY = p.y; this.sweepKey = this.occluderKey;
+        }
+        lt.setShadowLight(p.x, p.y, torchR, '#ffdca6', 1, this.torchPoly);
       }
-      ctx.restore();
+    }
+    const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 120);
+    for (const t of this.tears) lt.add(t.x + offX, t.y + offY, t.r * 7, t.color, 0.8);
+    for (const b of this.ebullets) {
+      const col = b.poison || b.slime ? '#bfff6a' : b.slow ? '#9fdf4a' : '#ff9a5a';
+      lt.add(b.x + offX, b.y + offY, (b.r + 6) * 4, col, 0.7);
+    }
+    for (const bomb of this.bombs) lt.add(bomb.x + offX, bomb.y + offY, 85 * pulse, '#ff8a3a', 0.95);
+    this.hazards.forEachFire((x, y, r) => lt.add(x + offX, y + offY, r * 2.4 * pulse, '#ff7a2a', 0.85));
+    lt.render(ctx, this.engine.width, this.engine.height, this.engine.pixelRatio);
+  }
+
+  /** Árnyék-mód állítása a beállításokból (azonnal él + perzisztál). */
+  setShadowMode(mode: ShadowMode): void {
+    this.shadowMode = mode;
+    saveShadowMode(mode);
+  }
+
+  /** Képernyőrázás-szorzó (a Beállítások · Grafika csúszkája) — azonnal él + perzisztál. */
+  setShakeScale(v: number): void {
+    this.fx.setShakeScale(v);
+    saveShake(v);
+  }
+  get shakeScale(): number { return this.fx.shakeScale; }
+
+  /**
+   * Az árnyékvetés takaróinak felépítése: a szoba-doboz négy éle + a tömör
+   * akadályok sziluettjei (a belérajzolt idomhoz közelítő nyolcszög-talp, lásd
+   * occluder.ts). Csak akkor sül újra, ha a szoba vagy a tömör akadályok száma
+   * változott (pl. láda szétlövésekor) — különben a gyorsítótárazott alakzatok
+   * maradnak; a fáklya-poligon frame-enként ezekből (a közeliekből) számol.
+   */
+  private rebuildOccluders(): void {
+    const room = this.currentRoom;
+    const rc = this._room;
+    const key = `${room.gx},${room.gy}|${room.obstacles.length}|${Math.round(rc.x)},${Math.round(rc.y)},${Math.round(rc.w)},${Math.round(rc.h)}`;
+    if (key === this.occluderKey) return;
+    this.occluderKey = key;
+    this.roomBox.length = 0;
+    this.pushRectEdges(this.roomBox, rc.x, rc.y, rc.w, rc.h); // a sugarak a falnál állnak meg
+    this.occShapes.length = 0;
+    for (const o of room.obstacles) {
+      if (!OBSTACLES[o.kind].solid) continue;
+      this.occShapes.push(buildOccluder(this.cellRect(o.col, o.row), o.kind));
     }
   }
 
-  /** Látótáv-alapú sötétség: 100% alatt a játékos körül világos kör, a szél sötét. */
-  private drawFog(ctx: CanvasRenderingContext2D): void {
-    const s = this.player.sight;
-    if (s >= 0.999) return;
-    const rc = this._room;
-    const px = this.player.x;
-    const py = this.player.y;
-    const maxR = Math.hypot(rc.w, rc.h) * 0.5;
-    const litR = Math.max(70, s * maxR);
-    const g = ctx.createRadialGradient(px, py, litR * 0.5, px, py, litR);
-    g.addColorStop(0, 'rgba(3,2,7,0)');
-    g.addColorStop(0.75, 'rgba(3,2,7,0.55)');
-    g.addColorStop(1, 'rgba(3,2,7,0.93)');
-    ctx.fillStyle = g;
-    ctx.fillRect(rc.x - ROOM.WALL, rc.y - ROOM.WALL, rc.w + ROOM.WALL * 2, rc.h + ROOM.WALL * 2);
+  /** Egy téglalap négy élének hozzáfűzése a takaró-szakaszokhoz. */
+  private pushRectEdges(segs: Seg[], x: number, y: number, w: number, h: number): void {
+    const x2 = x + w, y2 = y + h;
+    segs.push(
+      { ax: x, ay: y, bx: x2, by: y },
+      { ax: x2, ay: y, bx: x2, by: y2 },
+      { ax: x2, ay: y2, bx: x, by: y2 },
+      { ax: x, ay: y2, bx: x, by: y },
+    );
   }
 
   /**
@@ -2311,6 +2162,40 @@ export class World {
     drawPuddles(cctx, rc, this.currentRoom, (x, y) => this.isBlocked(x, y));
   }
 
+  /**
+   * Maradandó vérfoltok — a `floorCache`-hez hasonló GYORSÍTÓTÁRBÓL. A `drawSplats`
+   * determinisztikus (a folt pozíciójából hash-elt), így elég egyszer egy
+   * off-screen rétegre bélyegezni, és frame-enként csak egy `drawImage`. A réteg a
+   * szoba/méret/folt-szám változására sül újra (új ölésnél +1 folt → újrasül).
+   */
+  private drawCachedSplats(ctx: CanvasRenderingContext2D): void {
+    const room = this.currentRoom;
+    if (room.splats.length === 0) return; // nincs folt → nincs réteg
+    const rc = this._room;
+    const dpr = this.engine.pixelRatio;
+    const key = `${room.gx},${room.gy}|${room.splats.length}|${Math.round(rc.x)},${Math.round(rc.y)},${Math.round(rc.w)},${Math.round(rc.h)}|${dpr}`;
+    if (key !== this.splatCacheKey || !this.splatCache) {
+      this.bakeSplats(dpr);
+      this.splatCacheKey = key;
+    }
+    if (this.splatCache) ctx.drawImage(this.splatCache, rc.x, rc.y, rc.w, rc.h);
+  }
+
+  /** A vérfoltok egyszeri kirajzolása az off-screen splat-gyorsítótárra. */
+  private bakeSplats(dpr: number): void {
+    const rc = this._room;
+    const cw = Math.max(1, Math.round(rc.w * dpr));
+    const ch = Math.max(1, Math.round(rc.h * dpr));
+    let cv = this.splatCache;
+    if (!cv) { cv = document.createElement('canvas'); this.splatCache = cv; }
+    if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
+    const cctx = cv.getContext('2d');
+    if (!cctx) return;
+    cctx.setTransform(dpr, 0, 0, dpr, -rc.x * dpr, -rc.y * dpr);
+    cctx.clearRect(rc.x, rc.y, rc.w, rc.h);
+    drawSplats(cctx, this.currentRoom);
+  }
+
   private drawRoom(ctx: CanvasRenderingContext2D): void {
     const rc = this._room;
     const W = ROOM.WALL;
@@ -2325,7 +2210,7 @@ export class World {
       // drawImage-dzsel (lásd drawCachedFloor). A foltok/dekoráció ezután élőben,
       // mert azok harc közben változnak / témánként animálnak.
       this.drawCachedFloor(ctx);
-      drawSplats(ctx, this.currentRoom);
+      this.drawCachedSplats(ctx);
       drawDecorations(ctx, this.currentRoom, th, (x, y) => this.isBlocked(x, y));
 
       // szél-árnyalat

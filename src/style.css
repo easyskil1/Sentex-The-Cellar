@@ -432,6 +432,44 @@ body.dev [data-dev-only] { display: inline-block; }
 }
 .btn.ghost:hover { color: #f0c878; box-shadow: 0 5px 0 #1a160e, 0 9px 18px rgba(0, 0, 0, 0.45); }
 
+/* KÖZREMŰKÖDŐK lap — a főmenü hangulatában (Cinzel, arany, atmoszférikus háttér) */
+#credits { overflow-y: auto; }
+.credits-inner {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  width: min(560px, 90vw); padding: 48px 24px;
+  animation: creditsIn 0.55s ease both;
+}
+@keyframes creditsIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.credit-title {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(30px, 6vw, 54px); font-weight: 700; letter-spacing: 4px;
+  color: #f3e2bf; text-shadow: 0 4px 0 #5a3a1c, 0 0 36px rgba(255, 160, 60, 0.35);
+  margin: 0 0 26px;
+}
+.credit-section { width: 100%; margin-bottom: 30px; }
+.credit-heading {
+  font-family: "Cinzel", Georgia, serif; font-size: clamp(12px, 2.2vw, 15px);
+  letter-spacing: 6px; text-transform: uppercase; color: #b08a5a;
+  margin: 0 0 12px; padding-bottom: 9px;
+  border-bottom: 1px solid rgba(240, 200, 120, 0.18);
+}
+.credit-by {
+  margin: 0; font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(18px, 3vw, 23px); color: #f3e2bf; letter-spacing: 1px;
+}
+.credit-sub { margin: 5px 0 0; font-size: 13px; color: #8a7256; letter-spacing: 1px; }
+.credit-tech { margin: 8px 0 0; font-size: 13px; color: #8a7256; letter-spacing: 0.4px; line-height: 1.5; }
+.credit-tracks { display: flex; flex-direction: column; margin-top: 16px; }
+.credit-track {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 18px;
+  padding: 6px 4px; border-bottom: 1px solid rgba(240, 200, 120, 0.07);
+}
+.credit-track-name { color: #cdb98a; font-size: 14px; letter-spacing: 0.3px; }
+.credit-track-where { color: #7a6a52; font-size: 12.5px; letter-spacing: 0.5px; white-space: nowrap; }
+.credit-link { color: #f0c878; text-decoration: none; border-bottom: 1px solid rgba(240, 200, 120, 0.4); transition: color 0.2s, border-color 0.2s; }
+.credit-link:hover { color: #ffe0a0; border-bottom-color: #ffe0a0; }
+.credit-back { margin-top: 14px; }
+
 /* Vezérlés-kártya */
 #menu .controls {
   margin-top: 32px;
@@ -779,6 +817,74 @@ kbd.wide { min-width: auto; letter-spacing: 0.5px; }
   cursor: pointer;
 }
 .adm-toggle.on { background: #2a3a24; color: #9fe08f; border-color: rgba(120, 220, 120, 0.4); }
+
+/* Csúszka (hangerő / képernyőrázás) — sáv + arany fogantyú + élő érték-kijelzés */
+.adm-slider-wrap { display: inline-flex; align-items: center; gap: 10px; }
+.adm-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  --fill: 50%;
+  width: clamp(120px, 30vw, 220px);
+  height: 6px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #cf9b46, #f0c878) left / var(--fill) 100% no-repeat, #241d30;
+  cursor: pointer;
+}
+.adm-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #f0c878;
+  border: 2px solid #1a120a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+.adm-slider::-moz-range-thumb {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #f0c878;
+  border: 2px solid #1a120a;
+  cursor: pointer;
+}
+.adm-slider-val {
+  min-width: 42px;
+  text-align: right;
+  color: #f0c878;
+  font: 700 13px/1 system-ui, sans-serif;
+}
+
+/* Billentyű-cella (átköthető + fix) — „klaviatúra-gomb" kinézet */
+.adm-keycap {
+  min-width: 64px;
+  padding: 7px 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(240, 200, 120, 0.28);
+  border-bottom-width: 3px;
+  background: #241d30;
+  color: #f3e2bf;
+  font: 800 12px/1 system-ui, sans-serif;
+  text-align: center;
+  cursor: pointer;
+}
+.adm-keycap:hover { filter: brightness(1.15); }
+.adm-keycap.listening {
+  background: #3a3326;
+  color: #ffd36a;
+  border-color: #f0c878;
+  animation: keycap-pulse 0.9s ease-in-out infinite;
+}
+.adm-keycap.fixed {
+  cursor: default;
+  color: #8a7f70;
+  border-color: rgba(255, 255, 255, 0.12);
+  border-bottom-width: 1px;
+  background: #1a1626;
+}
+@keyframes keycap-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(240, 200, 120, 0.5); } 50% { box-shadow: 0 0 0 4px rgba(240, 200, 120, 0); } }
+
+/* A BEÁLLÍTÁSOK-hub fülei a fejléc admin-tabs sávjában (RANG-mintára) */
+#settingsTabs { flex-wrap: wrap; }
 
 /* Táblázat, sorvonalakkal + zebra (a balansz/zsákmány lapokhoz) */
 .adm-table { width: 100%; border-collapse: collapse; font-size: 13px; }

@@ -3,7 +3,7 @@ import { TAU } from '../../engine/math';
 export type BombType = 'tnt' | 'bomb';
 
 /**
- * Lerakható robbanószer (Isaac-stílus). A játékos lerakja, X mp múlva felrobban,
+ * Lerakható robbanószer. A játékos lerakja, X mp múlva felrobban,
  * és sebzi a robbanási sugarában lévő ellenfeleket, köveket — és a játékost is.
  *  - tnt: nagyobb hatókör, nagyobb sebzés (piros dinamit)
  *  - bomb: kisebb hatókör, kisebb sebzés (klasszikus kerek bomba)

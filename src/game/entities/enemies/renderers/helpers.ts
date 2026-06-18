@@ -5,20 +5,47 @@ import type { EnemyVisual } from './types';
 
 /* ----------------------------------------------------------------- *
  *  Szín-segédek: a típus-színből világosabb/sötétebb árnyalat
+ *
+ *  FORRÓ ÚT: a renderek képkockánként, ellenfelenként 3-5× hívják ezeket
+ *  fix színekkel/faktorokkal — ezért MEMOIZÁLT. Cache nélkül minden hívás egy
+ *  `parseInt`×3 + tömb + `rgb(...)` stringet allokálna (GC-nyomás), holott a
+ *  (hex, f) bemenet véges és ismétlődő. A cache így pixel-azonos, csak nem szemetel.
  * ----------------------------------------------------------------- */
+const parseCache = new Map<string, [number, number, number]>();
+const lightenCache = new Map<string, string>();
+const darkenCache = new Map<string, string>();
+
+/** A visszaadott tömb a cache-é — CSAK olvasásra (a hívók azonnal destrukturálják). */
 export function parse(hex: string): [number, number, number] {
-  const h = hex.replace('#', '');
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  let rgb = parseCache.get(hex);
+  if (!rgb) {
+    const h = hex.replace('#', '');
+    rgb = [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+    parseCache.set(hex, rgb);
+  }
+  return rgb;
 }
 
 export function lighten(hex: string, f: number): string {
-  const [r, g, b] = parse(hex);
-  return `rgb(${Math.round(r + (255 - r) * f)},${Math.round(g + (255 - g) * f)},${Math.round(b + (255 - b) * f)})`;
+  const key = hex + ';' + f;
+  let s = lightenCache.get(key);
+  if (s === undefined) {
+    const [r, g, b] = parse(hex);
+    s = `rgb(${Math.round(r + (255 - r) * f)},${Math.round(g + (255 - g) * f)},${Math.round(b + (255 - b) * f)})`;
+    lightenCache.set(key, s);
+  }
+  return s;
 }
 
 export function darken(hex: string, f: number): string {
-  const [r, g, b] = parse(hex);
-  return `rgb(${Math.round(r * (1 - f))},${Math.round(g * (1 - f))},${Math.round(b * (1 - f))})`;
+  const key = hex + ';' + f;
+  let s = darkenCache.get(key);
+  if (s === undefined) {
+    const [r, g, b] = parse(hex);
+    s = `rgb(${Math.round(r * (1 - f))},${Math.round(g * (1 - f))},${Math.round(b * (1 - f))})`;
+    darkenCache.set(key, s);
+  }
+  return s;
 }
 
 /** Talaj-árnyék — minden típus ezt használja, méret-skálával. */

@@ -17,9 +17,28 @@ export class Engine {
   height = 0;
 
   private dpr = Math.min(window.devicePixelRatio || 1, 2);
+  /** Render-felbontás szorzó (Beállítások · Grafika): 1 = teljes, <1 = gyorsabb, lágyabb kép. */
+  private scale = 1;
 
-  /** Aktuális eszköz-pixelarány (cache-canvasok éles méretezéséhez). */
-  get pixelRatio(): number { return this.dpr; }
+  /** Tényleges rajz-pixelarány: eszköz-DPR × render-skála. */
+  private get effDpr(): number { return this.dpr * this.scale; }
+  /** Aktuális rajz-pixelarány (cache-canvasok éles méretezése + a render-skála). */
+  get pixelRatio(): number { return this.effDpr; }
+
+  /** Render-skála beállítása (pl. 1 / 0.75 / 0.5) - azonnal újraméretezi a vásznat. */
+  setRenderScale(s: number): void {
+    this.scale = s;
+    this.resize();
+  }
+
+  // Valós FPS a NYERS képkocka-időből (a dt-vágástól függetlenül), 0.5 s-os
+  // ablakban átlagolva - stabil, tényleges érték a kijelzőnek.
+  private fpsAccumMs = 0;
+  private fpsFrames = 0;
+  private fpsValue = 0;
+  /** Az utolsó kb. fél másodperc mért, valós képkocka/másodperc értéke. */
+  get fps(): number { return this.fpsValue; }
+
   private last = 0;
   private running = false;
   private cb: EngineCallbacks | null = null;
@@ -39,11 +58,12 @@ export class Engine {
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.width = window.innerWidth;
     this.height = window.innerHeight;
-    this.canvas.width = Math.round(this.width * this.dpr);
-    this.canvas.height = Math.round(this.height * this.dpr);
+    const e = this.effDpr;
+    this.canvas.width = Math.round(this.width * e);
+    this.canvas.height = Math.round(this.height * e);
     this.canvas.style.width = `${this.width}px`;
     this.canvas.style.height = `${this.height}px`;
-    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.ctx.setTransform(e, 0, 0, e, 0, 0);
   }
 
   start(cb: EngineCallbacks): void {
@@ -60,16 +80,26 @@ export class Engine {
 
   private loop = (now: number): void => {
     if (!this.running || !this.cb) return;
-    let dt = (now - this.last) / 1000;
+    const rawMs = now - this.last;
+    let dt = rawMs / 1000;
     this.last = now;
     if (dt > 0.05) dt = 0.05; // nagy hézagok levágása (pl. fókuszvesztés után)
+
+    // Valós FPS a NYERS időből (nem a vágott dt-ből): 0.5 s-os ablak átlaga.
+    this.fpsAccumMs += rawMs;
+    this.fpsFrames++;
+    if (this.fpsAccumMs >= 500) {
+      this.fpsValue = (this.fpsFrames * 1000) / this.fpsAccumMs;
+      this.fpsAccumMs = 0;
+      this.fpsFrames = 0;
+    }
 
     // Egy hibás képkocka ne állítsa le végleg a játékot: naplózzuk a hibát,
     // de a ciklust mindig újraütemezzük.
     try {
       this.cb.update(dt);
-      // setTransform újrabeállítja a DPR-skálát és törli a maradék transzformokat
-      this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      // setTransform újrabeállítja a (skálázott) DPR-t és törli a maradék transzformokat
+      this.ctx.setTransform(this.effDpr, 0, 0, this.effDpr, 0, 0);
       this.cb.render(this.ctx);
     } catch (err) {
       console.error('[Engine] hiba a képkockában:', err);

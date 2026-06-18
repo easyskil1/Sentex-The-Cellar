@@ -54,6 +54,7 @@
         <button class="menu-link primary" data-action="start">Play</button>
         <button class="menu-link" data-action="rank">Rank</button>
         <button class="menu-link" data-action="settings">Settings</button>
+        <button class="menu-link" data-action="credits">Credits</button>
       </nav>
     </div>
   </div>
@@ -119,9 +120,15 @@
   <div id="settings" class="overlay sheetpage hidden">
     <div class="admin-bar">
       <span class="admin-title">⚙ SETTINGS</span>
+      <div class="admin-tabs" id="settingsTabs"></div>
       <button class="btn small" data-action="menu">← BACK</button>
     </div>
     <div id="settingsBody" class="page-body"></div>
+  </div>
+
+  <!-- KÖZREMŰKÖDŐK: a főmenü hangulatában (nem admin-lap) -->
+  <div id="credits" class="overlay credits-screen hidden">
+    <div id="creditsBody" class="credits-inner"></div>
   </div>
 
   <!-- Mobil érintővezérlés -->

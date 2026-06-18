@@ -1,12 +1,32 @@
 import type { Vec2 } from './math';
 
 /**
+ * Átállítható játék-akciók (a Beállítások · Irányítás lap köti billentyűkhöz).
+ * A négy mozgás + négy lövésirány + a szünet/skill/bomba/TNT. Az egér-célzás és
+ * a virtuális joystickok NEM köthetők át (mindig aktívak).
+ */
+export type InputAction =
+  | 'up' | 'down' | 'left' | 'right'
+  | 'shoot-up' | 'shoot-down' | 'shoot-left' | 'shoot-right'
+  | 'pause' | 'skill' | 'bomb' | 'tnt';
+
+/** Gyári billentyű-kiosztás (a mentett felülírások erre épülnek rá). */
+export const DEFAULT_BINDS: Record<InputAction, string> = {
+  up: 'w', down: 's', left: 'a', right: 'd',
+  'shoot-up': 'arrowup', 'shoot-down': 'arrowdown', 'shoot-left': 'arrowleft', 'shoot-right': 'arrowright',
+  pause: 'p', skill: 'e', bomb: 'b', tnt: 't',
+};
+
+/**
  * Központi bemenetkezelő: billentyűzet, egér és érintőképernyő.
  * A játéklogika innen kérdezi le az aktuális állapotot (poll-alapú).
  */
 export class Input {
   readonly keys: Record<string, boolean> = {};
   readonly mouse = { x: 0, y: 0, down: false };
+
+  /** Aktuális billentyű-kiosztás (akció → kisbetűs `e.key`). A Game tölti be mentésből. */
+  private binds: Record<InputAction, string> = { ...DEFAULT_BINDS };
 
   /** Görgetés-akkumulátor (egér kerék); a UI poll-onként lekérdezi és nullázza. */
   private wheelAccum = 0;
@@ -30,12 +50,16 @@ export class Input {
       const k = e.key.toLowerCase();
       const wasDown = this.keys[k];
       this.keys[k] = true;
-      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
-      if (k === 'p' || k === 'escape') this.pauseRequested = true;
+      // Görgetés/oldalmozgás megelőzése: nyilak/space + bármely lekötött billentyű.
+      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k) || this.isBound(k)) e.preventDefault();
+      // Szünet: a lekötött pause-billentyű VAGY mindig az Escape (kimeneti kapu).
+      if (k === this.binds.pause || k === 'escape') this.pauseRequested = true;
       // Felfutó él (nem ismétlődik nyomva tartásra):
-      if (k === 'e' && !wasDown) this.skillRequested = true;   // aktív skill
-      if (k === 't' && !wasDown) this.tntRequested = true;     // TNT
-      if (k === 'b' && !wasDown) this.bombRequested = true;    // bomba
+      if (!wasDown) {
+        if (k === this.binds.skill) this.skillRequested = true;   // aktív skill
+        if (k === this.binds.tnt) this.tntRequested = true;       // TNT
+        if (k === this.binds.bomb) this.bombRequested = true;     // bomba
+      }
     });
     addEventListener('keyup', (e) => {
       this.keys[e.key.toLowerCase()] = false;
@@ -103,14 +127,48 @@ export class Input {
     return false;
   }
 
-  /** Mozgásirány a WASD + bal stick alapján (egységvektor vagy nullvektor). */
+  /** A megadott akcióhoz rendelt billentyű (kisbetűs `e.key`). */
+  bind(action: InputAction): string {
+    return this.binds[action];
+  }
+
+  /** Az aktuális kiosztás másolata (a Beállítások lap kirajzolásához). */
+  bindings(): Record<InputAction, string> {
+    return { ...this.binds };
+  }
+
+  /** Igaz, ha a billentyű bármely akcióhoz le van kötve (preventDefault-hoz). */
+  isBound(key: string): boolean {
+    return (Object.values(this.binds) as string[]).includes(key);
+  }
+
+  /** Teljes kiosztás betöltése (mentésből); a hiányzó akciók a gyári értéket kapják. */
+  setBinds(map: Partial<Record<InputAction, string>>): void {
+    this.binds = { ...DEFAULT_BINDS, ...map };
+  }
+
+  /**
+   * Egy akció átkötése. Ütközéskor (egy billentyű egyszerre csak egy akcióé)
+   * a régi tulajdonos megkapja az átkötött akció korábbi billentyűjét (csere),
+   * így nem marad lekötetlen akció.
+   */
+  setBind(action: InputAction, key: string): void {
+    const k = key.toLowerCase();
+    const prev = this.binds[action];
+    for (const a of Object.keys(this.binds) as InputAction[]) {
+      if (a !== action && this.binds[a] === k) this.binds[a] = prev;
+    }
+    this.binds[action] = k;
+  }
+
+  /** Mozgásirány a lekötött mozgás-billentyűk + bal stick alapján (egységvektor vagy nullvektor). */
   moveVector(): Vec2 {
     let x = 0;
     let y = 0;
-    if (this.isDown('a')) x -= 1;
-    if (this.isDown('d')) x += 1;
-    if (this.isDown('w')) y -= 1;
-    if (this.isDown('s')) y += 1;
+    if (this.isDown(this.binds.left)) x -= 1;
+    if (this.isDown(this.binds.right)) x += 1;
+    if (this.isDown(this.binds.up)) y -= 1;
+    if (this.isDown(this.binds.down)) y += 1;
     if (this.moveStick.active) {
       x += this.moveStick.dx;
       y += this.moveStick.dy;
@@ -119,14 +177,14 @@ export class Input {
     return m > 1 ? { x: x / m, y: y / m } : { x, y };
   }
 
-  /** Lövésirány a nyilak + jobb stick alapján (nem normalizált). */
+  /** Lövésirány a lekötött lövés-billentyűk + jobb stick alapján (nem normalizált). */
   shootVector(): Vec2 {
     let x = 0;
     let y = 0;
-    if (this.isDown('arrowleft')) x -= 1;
-    if (this.isDown('arrowright')) x += 1;
-    if (this.isDown('arrowup')) y -= 1;
-    if (this.isDown('arrowdown')) y += 1;
+    if (this.isDown(this.binds['shoot-left'])) x -= 1;
+    if (this.isDown(this.binds['shoot-right'])) x += 1;
+    if (this.isDown(this.binds['shoot-up'])) y -= 1;
+    if (this.isDown(this.binds['shoot-down'])) y += 1;
     if (this.shootStick.active && (Math.abs(this.shootStick.dx) > 0.3 || Math.abs(this.shootStick.dy) > 0.3)) {
       x = this.shootStick.dx;
       y = this.shootStick.dy;

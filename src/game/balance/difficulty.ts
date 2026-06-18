@@ -54,7 +54,7 @@ export function enemyScaleFromPower(floor: number, power: number): EnemyScale {
 }
 
 /**
- * GLOBÁLIS bejövő-sebzés szorzó a MÉLYSÉG alapján (Binding of Isaac-minta: a
+ * GLOBÁLIS bejövő-sebzés szorzó a MÉLYSÉG alapján (roguelike-minta: a
  * fél-szív találatok a mély szinteken teljes szívvé válnak). Egyetlen helyen
  * dől el, és MINDEN nem-boss ellenfél sebzésére hat — lövedék, érintés ÉS
  * talaj-veszély egyaránt —, mert a World.damagePlayer alkalmazza. A plafon

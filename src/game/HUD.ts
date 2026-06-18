@@ -437,7 +437,17 @@ function drawTimers(ctx: CanvasRenderingContext2D, world: World, w: number): voi
   ctx.textBaseline = 'alphabetic';
 
   if (world.isLabyrinth) {
-    drawTimerLine(ctx, cx, MAP_TOP - 26, 'LABYRINTH', formatTime(rs.lab), COL.gold);
+    // visszaszámláló: a kijáratig kell érni, mielőtt lejár. Vész alatt sárgára,
+    // majd 10 mp alatt lüktető pirosra vált, és tizedmásodpercet is mutat.
+    const left = world.labTimeRemaining;
+    const urgent = left < 10;
+    let col = COL.gold;
+    if (left < 20) col = '#f0a050';
+    if (urgent) {
+      const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 110);
+      col = `rgba(255,${Math.round(70 + 40 * pulse)},${Math.round(60 + 30 * pulse)},1)`;
+    }
+    drawTimerLine(ctx, cx, MAP_TOP - 26, 'LABYRINTH', formatTime(left, urgent), col);
   } else {
     drawTimerLine(ctx, cx, MAP_TOP - 30, 'ROOM', formatTime(rs.room, true), COL.cream);
     drawTimerLine(ctx, cx, MAP_TOP - 12, 'MAP', formatTime(rs.floor), COL.gold);

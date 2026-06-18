@@ -3,7 +3,7 @@ import { TAU, shade } from '../../engine/math';
 /**
  * A játékos kinézetének önálló renderelője — leválasztva a Player logikájáról.
  *
- * Réteges/forma-alapú jelmez-rendszer (Isaac-stílus): a `cosmetics` lista
+ * Réteges/forma-alapú jelmez-rendszer: a `cosmetics` lista
  * dönti el, mit rajzolunk. Alapból a barátságos, fehér ruhás akolitus; bizonyos
  * tárgyak más formát/réteget kapcsolnak be (pl. 'wraith' → sötét csuklyás).
  *

@@ -12,11 +12,15 @@ import {
 } from '../game/progression';
 import { formatTime, type LifetimeStats, type TimeRecords } from '../game/stats';
 import { drawMedal } from '../game/medal';
-import { el, pageHeader, panel, table, toggleField, button } from './kit';
+import { BIND_META, keyLabel } from '../game/settings';
+import type { InputAction } from '../engine/Input';
+import { el, pageHeader, panel, table, toggleField, button, select, slider } from './kit';
 
 export type OverlayAction =
-  | 'start' | 'resume' | 'menu' | 'rank' | 'settings' | 'edit-name'
-  | 'toggle-audio' | 'reset-progress' | 'narrator'
+  | 'start' | 'resume' | 'menu' | 'rank' | 'settings' | 'credits' | 'edit-name'
+  | 'toggle-audio' | 'reset-progress' | 'narrator' | 'toggle-fps' | 'toggle-fullscreen'
+  | 'rscale-100' | 'rscale-75' | 'rscale-50'
+  | 'shadow-off' | 'shadow-hard' | 'shadow-soft'
   | 'offer-accept' | 'offer-decline';
 
 /** Egy felugró ajánlat-ablak (bolti vásárlás / értesítés) tartalma. */
@@ -55,10 +59,29 @@ export interface RankView {
 /** A RANG hub almenüi. */
 type RankTab = 'profile' | 'records' | 'stats' | 'board';
 
-/** A BEÁLLÍTÁSOK lap adatai. */
+/** A BEÁLLÍTÁSOK lap adatai (a Game állítja össze minden megnyitáskor). */
 export interface SettingsView {
   muted: boolean;
+  /** Vetett árnyék minősége: 'off' | 'hard' | 'soft'. */
+  shadowMode: string;
+  /** Képernyőrázás-szorzó (0..1). */
+  shake: number;
+  /** Zene-hangerő (0..1). */
+  musicVolume: number;
+  /** Hangeffekt-hangerő (0..1). */
+  sfxVolume: number;
+  /** Aktuális billentyű-kiosztás (akció → kisbetűs `e.key`). */
+  binds: Record<InputAction, string>;
+  /** Valós FPS-számláló megjelenítése (Grafika lap kapcsolója). */
+  fpsShown: boolean;
+  /** Render-felbontás szorzó (1 / 0.75 / 0.5). */
+  renderScale: number;
+  /** Teljes képernyő aktív-e (a böngésző Fullscreen API állapota). */
+  fullscreen: boolean;
 }
+
+/** A BEÁLLÍTÁSOK hub almenüi. */
+type SettingsTab = 'graphics' | 'audio' | 'controls' | 'general';
 
 export interface GameOverData {
   won: boolean;
@@ -114,6 +137,24 @@ export class Overlays {
   private rankViewData: RankView | null = null;
   private readonly settings = byId('settings');
   private readonly settingsBody = byId('settingsBody');
+  /** A BEÁLLÍTÁSOK fejléc-fülsora (admin-mintára a admin-bar-ban él). */
+  private readonly settingsTabs = byId('settingsTabs');
+  /** Az aktív BEÁLLÍTÁSOK-almenü (a fülek belül váltanak, megnyitáskor megmarad). */
+  private settingsTab: SettingsTab = 'graphics';
+  private settingsViewData: SettingsView | null = null;
+  /** Folyamatban lévő billentyű-rögzítés leszerelője (egyszerre csak egy aktív). */
+  private cancelCapture: (() => void) | null = null;
+  private readonly credits = byId('credits');
+  private readonly creditsBody = byId('creditsBody');
+
+  /** Folyamatos beállítás-callbackek (a Game köti be); a csúszka húzás közben hív. */
+  onMusicVolume: (v: number) => void = () => {};
+  onSfxVolume: (v: number) => void = () => {};
+  onShake: (v: number) => void = () => {};
+  /** Egy akció átkötése egy billentyűre (a Game menti + újrarajzol). */
+  onRebind: (action: InputAction, key: string) => void = () => {};
+  /** Billentyű-kiosztás visszaállítása a gyári értékekre. */
+  onResetBinds: () => void = () => {};
 
   constructor() {
     document.querySelectorAll<HTMLElement>('[data-action]').forEach((el) => {
@@ -151,6 +192,7 @@ export class Overlays {
   }
 
   hideAll(): void {
+    this.cancelCapture?.();   // billentyű-rögzítés megszakítása lapváltáskor
     this.menu.classList.add('hidden');
     this.pause.classList.add('hidden');
     this.gameover.classList.add('hidden');
@@ -158,6 +200,7 @@ export class Overlays {
     this.nameModal.classList.add('hidden');
     this.rank.classList.add('hidden');
     this.settings.classList.add('hidden');
+    this.credits.classList.add('hidden');
   }
 
   /** Vásárlás-megerősítő ablak: jelvény + cím + leírás + ár + döntés. */
@@ -339,10 +382,157 @@ export class Overlays {
     ]);
   }
 
-  /** BEÁLLÍTÁSOK lap (admin-kinézet): hang, név, haladás-törlés + irányítás. */
+  /** BEÁLLÍTÁSOK hub: grafika / hang / irányítás / általános almenük (belül váltanak). */
   showSettings(view: SettingsView): void {
     this.hideAll();
+    this.settingsViewData = view;
+    this.renderSettings();
+    this.settings.classList.remove('hidden');
+  }
 
+  /** Az aktív BEÁLLÍTÁSOK-almenü kirajzolása (a fülek erre váltanak, újraindítás nélkül). */
+  private renderSettings(): void {
+    const view = this.settingsViewData;
+    if (!view) return;
+    this.cancelCapture?.();   // fülváltás/újrarajzolás közben ne maradjon élő figyelő
+
+    this.settingsTabs.replaceChildren(
+      this.settingsTabBtn('graphics', '🖥 Graphics'),
+      this.settingsTabBtn('audio', '🔊 Audio'),
+      this.settingsTabBtn('controls', '⌨ Controls'),
+      this.settingsTabBtn('general', '⚙ General'),
+    );
+
+    const [title, sub, body] =
+      this.settingsTab === 'graphics' ? ['Graphics', 'Visual quality and performance.', this.settingsGraphics(view)]
+      : this.settingsTab === 'audio' ? ['Audio', 'Music and sound effect volume.', this.settingsAudio(view)]
+      : this.settingsTab === 'controls' ? ['Controls', 'Click a key to rebind it. Mouse aims and fires.', this.settingsControls(view)]
+      : ['General', 'Character and saved progress.', this.settingsGeneral()] as [string, string, HTMLElement];
+
+    this.settingsBody.replaceChildren(el('div', { class: 'adm-page' }, [
+      pageHeader(title as string, sub as string),
+      body as HTMLElement,
+    ]));
+  }
+
+  private settingsTabBtn(tab: SettingsTab, label: string): HTMLElement {
+    const b = el('button', { class: `btn small${this.settingsTab === tab ? ' active' : ''}`, text: label });
+    b.addEventListener('click', () => { this.settingsTab = tab; this.renderSettings(); });
+    return b;
+  }
+
+  /** Grafika-almenü: árnyék-minőség + képernyőrázás-erősség. */
+  private settingsGraphics(view: SettingsView): HTMLElement {
+    const shadowRow = el('label', { class: 'adm-field' }, [
+      el('span', { class: 'adm-field-label' }, [
+        'Shadows',
+        el('small', { class: 'adm-field-help', text: 'lower this if the game stutters' }),
+      ]),
+      select({
+        value: view.shadowMode,
+        options: [
+          { value: 'off', label: 'Off' },
+          { value: 'hard', label: 'Sharp' },
+          { value: 'soft', label: 'Soft' },
+        ],
+        onChange: (v) => this.onAction(`shadow-${v}` as OverlayAction),
+      }),
+    ]);
+    const scaleRow = el('label', { class: 'adm-field' }, [
+      el('span', { class: 'adm-field-label' }, [
+        'Resolution',
+        el('small', { class: 'adm-field-help', text: 'lower this for more FPS' }),
+      ]),
+      select({
+        value: String(Math.round(view.renderScale * 100)),
+        options: [
+          { value: '100', label: '100%' },
+          { value: '75', label: '75%' },
+          { value: '50', label: '50%' },
+        ],
+        onChange: (v) => this.onAction(`rscale-${v}` as OverlayAction),
+      }),
+    ]);
+    return panel('Display', [
+      shadowRow,
+      scaleRow,
+      toggleField({ label: 'Fullscreen', value: view.fullscreen, onChange: () => this.onAction('toggle-fullscreen'), onLabel: 'ON', offLabel: 'OFF' }),
+      slider({ label: 'Screen shake', value: view.shake, format: pct, onChange: (v) => this.onShake(v) }),
+      toggleField({ label: 'FPS counter', value: view.fpsShown, onChange: () => this.onAction('toggle-fps'), onLabel: 'ON', offLabel: 'OFF' }),
+    ]);
+  }
+
+  /** Hang-almenü: némítás + zene/effekt hangerő-csúszkák. */
+  private settingsAudio(view: SettingsView): HTMLElement {
+    return panel('Volume', [
+      toggleField({ label: 'Audio', value: !view.muted, onChange: () => this.onAction('toggle-audio'), onLabel: 'ON', offLabel: 'OFF' }),
+      slider({ label: 'Music', value: view.musicVolume, format: pct, onChange: (v) => this.onMusicVolume(v) }),
+      slider({ label: 'Sound effects', value: view.sfxVolume, format: pct, onChange: (v) => this.onSfxVolume(v) }),
+    ]);
+  }
+
+  /** Irányítás-almenü: átköthető billentyűk csoportonként + nem köthető segédek. */
+  private settingsControls(view: SettingsView): HTMLElement {
+    const groupLabel = { move: 'Movement', shoot: 'Shooting', action: 'Actions' } as const;
+    const groups = (['move', 'shoot', 'action'] as const).map((g) =>
+      panel(groupLabel[g], BIND_META.filter((m) => m.group === g).map((m) =>
+        this.keybindRow(m.action, m.label, view.binds[m.action]),
+      )),
+    );
+    const fixed = panel('Always on', [
+      this.fixedRow('Aim & fire', '🖱 Mouse'),
+      this.fixedRow('Quit / pause', 'Esc'),
+      this.fixedRow('Mute', 'M'),
+    ]);
+    const resetBtn = el('div', { class: 'adm-savebar' }, [
+      button('↺ Reset to defaults', () => this.onResetBinds(), 'ghost'),
+    ]);
+    return el('div', {}, [...groups, fixed, resetBtn]);
+  }
+
+  /** Egy átköthető billentyű sora: címke + kattintható billentyű-cella (capture). */
+  private keybindRow(action: InputAction, label: string, key: string): HTMLElement {
+    const cap = el('button', { class: 'adm-keycap', text: keyLabel(key) });
+    cap.addEventListener('click', () => this.captureKey(action, cap));
+    return el('label', { class: 'adm-field' }, [
+      el('span', { class: 'adm-field-label', text: label }),
+      cap,
+    ]);
+  }
+
+  /** Egy nem-átköthető sor (csak tájékoztat): címke + fix billentyű-jelölés. */
+  private fixedRow(label: string, key: string): HTMLElement {
+    return el('label', { class: 'adm-field' }, [
+      el('span', { class: 'adm-field-label', text: label }),
+      el('span', { class: 'adm-keycap fixed', text: key }),
+    ]);
+  }
+
+  /**
+   * Billentyű-rögzítés: a cella „Press a key…"-re vált, és a következő billentyű-
+   * lenyomást elkapja. Escape = mégsem. Sikeres rögzítéskor az `onRebind` fut
+   * (a Game menti + frissíti a nézetet); a Game újrahívja a showSettings-t.
+   */
+  private captureKey(action: InputAction, cap: HTMLElement): void {
+    this.cancelCapture?.();   // egy korábbi, lenyomás nélkül hagyott rögzítés lezárása
+    cap.classList.add('listening');
+    cap.textContent = 'Press a key…';
+    const onKey = (e: KeyboardEvent): void => {
+      e.preventDefault();
+      this.cancelCapture?.();
+      const k = e.key.toLowerCase();
+      if (k === 'escape') { this.renderSettings(); return; }   // mégsem
+      this.onRebind(action, k);
+    };
+    window.addEventListener('keydown', onKey, true);
+    this.cancelCapture = () => {
+      window.removeEventListener('keydown', onKey, true);
+      this.cancelCapture = null;
+    };
+  }
+
+  /** Általános-almenü: karakternév szerkesztése + haladás-törlés. */
+  private settingsGeneral(): HTMLElement {
     const nameRow = el('label', { class: 'adm-field' }, [
       el('span', { class: 'adm-field-label', text: 'Character name' }),
       button('✎ Edit', () => this.onAction('edit-name'), 'ghost'),
@@ -350,30 +540,57 @@ export class Overlays {
     const resetRow = el('label', { class: 'adm-field' }, [
       el('span', { class: 'adm-field-label' }, [
         'Reset progress',
-        el('small', { class: 'adm-field-help', text: 'total score, rank and leaderboard (name is kept)' }),
+        el('small', { class: 'adm-field-help', text: 'total score, rank, leaderboard, records and stats (name is kept)' }),
       ]),
       button('🗑 Reset', () => this.onAction('reset-progress'), 'danger'),
     ]);
+    return panel('Profile', [nameRow, resetRow]);
+  }
 
-    const controls = table(['Key', 'Action'], [
-      ['W A S D', 'move'],
-      ['↑ ↓ ← →', 'tear shooting'],
-      ['🖱 mouse', 'aimed shooting'],
-      ['P / Esc', 'pause'],
-      ['E', 'active skill'],
-      ['B', 'drop bomb'],
-    ]);
+  /** KÖZREMŰKÖDŐK lap: a zene forrása/szerzője/licence + a játék készítője.
+   *  A FŐMENÜ hangulatában (Cinzel, arany, atmoszférikus háttér), nem admin-lap. */
+  showCredits(): void {
+    this.hideAll();
+    const link = (text: string, href: string): HTMLAnchorElement => {
+      const a = el('a', { class: 'credit-link', text });
+      a.href = href; a.target = '_blank'; a.rel = 'noopener';
+      return a;
+    };
+    const trackRow = (name: string, where: string): HTMLElement =>
+      el('div', { class: 'credit-track' }, [
+        el('span', { class: 'credit-track-name', text: name }),
+        el('span', { class: 'credit-track-where', text: where }),
+      ]);
+    const section = (heading: string, body: HTMLElement[]): HTMLElement =>
+      el('div', { class: 'credit-section' }, [el('h2', { class: 'credit-heading', text: heading }), ...body]);
 
-    this.settingsBody.replaceChildren(el('div', { class: 'adm-page' }, [
-      pageHeader('Settings', 'Audio, character name and progress. Controls below.'),
-      panel('General', [
-        toggleField({ label: 'Audio', value: !view.muted, onChange: () => this.onAction('toggle-audio'), onLabel: 'ON', offLabel: 'OFF' }),
-        nameRow,
-        resetRow,
+    const back = el('button', { class: 'menu-link credit-back', text: '← Back' });
+    back.addEventListener('click', () => this.onAction('menu'));
+
+    this.creditsBody.replaceChildren(
+      el('h1', { class: 'credit-title', text: 'Credits' }),
+      section('Music', [
+        el('p', { class: 'credit-by', text: 'Kevin MacLeod' }),
+        el('p', { class: 'credit-sub' }, [link('incompetech.com', 'https://incompetech.com'), ' · ', link('CC BY 4.0', 'https://creativecommons.org/licenses/by/4.0/')]),
+        el('div', { class: 'credit-tracks' }, [
+          trackRow('Echoes of Time v2', 'Main menu'),
+          trackRow('Hush', 'The Cellar'),
+          trackRow('Long Note Four', 'Hollow'),
+          trackRow('Anguish', 'Depths'),
+          trackRow('Ossuary 1, A Beginning', 'Necropolis'),
+          trackRow('Darkling', "Dragon's Lair"),
+          trackRow('Crypto', 'Combat'),
+          trackRow('Heavy Interlude', 'Combat'),
+        ]),
       ]),
-      panel('Controls', [controls]),
-    ]));
-    this.settings.classList.remove('hidden');
+      section('Game', [
+        el('p', { class: 'credit-by', text: 'Sentex: The Cellar' }),
+        el('p', { class: 'credit-sub', text: '© Easyskil Team' }),
+        el('p', { class: 'credit-tech', text: 'Procedural Canvas engine. TypeScript, Vite. No game-engine dependencies.' }),
+      ]),
+      back,
+    );
+    this.credits.classList.remove('hidden');
   }
 
   /**
@@ -438,6 +655,11 @@ function paintMedal(canvas: HTMLCanvasElement, rank: number, band: Band): void {
 
 function fmt(n: number): string {
   return Math.round(n).toLocaleString('en-US');
+}
+
+/** 0..1 érték százalékos kijelzése a hangerő/rázás csúszkákhoz. */
+function pct(v: number): string {
+  return `${Math.round(v * 100)}%`;
 }
 
 /** Stat-csempék rácsa: nagy érték + alatta kis címke (a RANG · Rekord/Stat lapokhoz). */

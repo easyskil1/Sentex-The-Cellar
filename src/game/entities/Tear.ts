@@ -43,6 +43,9 @@ export class Tear {
   private readonly shock: boolean;
   /** Átütő könny: ezeket az ellenfeleket már sebezte (ne többször ugyanazt). */
   private readonly hits = new Set<IEnemy>();
+  /** Broad-phase candidate-pufferek (újrahasznosítva → nincs frame-allokáció). */
+  private readonly nearBuf: IEnemy[] = [];
+  private readonly chainBuf: IEnemy[] = [];
 
   constructor(
     public x: number,
@@ -98,8 +101,9 @@ export class Tear {
       else { this.die(world); return; }
     }
 
-    // ellenség-találat
-    const enemies = world.enemies;
+    // ellenség-találat — broad-phase a CollisionSystem térrácsán (csak a közeli
+    // ellenfelek, nem a teljes szoba), a candidate-puffert újrahasználjuk
+    const enemies = world.collision.enemiesNear(this.x, this.y, this.r, this.nearBuf);
     for (let j = enemies.length - 1; j >= 0; j--) {
       const e = enemies[j];
       if (!e) continue; // a lánc-villám/halál közben rövidülhet a tömb
@@ -140,9 +144,11 @@ export class Tear {
 
   /** Lánc-villám: a találat a közeli ellenfelekre is átível (fél sebzés, max 3 cél). */
   private chain(from: IEnemy, world: World): void {
-    const R2 = 120 * 120;
+    const R = 120, R2 = R * R;
     let arcs = 0;
-    for (const e of [...world.enemies]) {
+    const near = world.collision.enemiesNear(from.x, from.y, R, this.chainBuf);
+    for (let i = 0; i < near.length; i++) {
+      const e = near[i]!;
       if (e === from) continue;
       if (dist2(from.x, from.y, e.x, e.y) >= R2) continue;
       e.hp -= this.dmg * 0.5;
@@ -156,12 +162,7 @@ export class Tear {
 
   /** A sebességet a legközelebbi ellenfél felé forgatja (homing). */
   private steer(dt: number, world: World): void {
-    let best: IEnemy | null = null;
-    let bd = Infinity;
-    for (const e of world.enemies) {
-      const d = dist2(this.x, this.y, e.x, e.y);
-      if (d < bd) { bd = d; best = e; }
-    }
+    const best = world.collision.nearestEnemy(this.x, this.y);
     if (!best) return;
     const desired = Math.atan2(best.y - this.y, best.x - this.x);
     const cur = Math.atan2(this.vy, this.vx);

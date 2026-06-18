@@ -1,102 +1,49 @@
 import { Boss } from './Boss';
-import { TAU } from '../../../engine/math';
+import { drawEnemy } from './renderers';
+import { clamp } from '../../../engine/math';
 
 /**
  * A mérges Fenevad — a klasszikus Fenevad variánsa. Ugyanaz a viselkedés és
- * test, de fekete szem + fekete (morgó) száj és karok/öklök. Csak a rajz
- * felülírt hook-jai különböznek (lásd `Boss.drawFace` / `Boss.drawArms`).
+ * test, de fekete szem + fekete (morgó) száj és karok/öklök.
+ * Most már a modern drawBossBeast renderelőt használja.
  */
 export class Boss3 extends Boss {
-  constructor(x: number, y: number, floor: number, color = '#9c4bd8') {
-    // A mérges Fenevad saját, FIX statjai és mintái — független a klasszikus
-    // Fenevad hangolásától (30000 HP, 750 sebzés, mindhárom támadás-minta).
-    // dmg fél-szívben: 1.5 × HP.half(500) = 750 kijelzett pont.
+  constructor(x: number, y: number, floor: number, color = '#ff3a3a') {
+    // A mérges Fenevad saját, FIX statjai és mintái.
     super(x, y, floor, color, { hp: 30000, dmg: 1.5, attacks: ['circle', 'spread', 'dash'] });
   }
 
-  /** Fekete szem (dühös szemöldökkel) + tömör fekete száj — izzás nélkül. */
-  protected override drawFace(ctx: CanvasRenderingContext2D, flash: boolean): void {
-    // Szemek — tömör fekete (nincs piros izzás)
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.arc(-16, -6, 10, 0, TAU);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(16, -6, 10, 0, TAU);
-    ctx.fill();
-
-    // Találat-villanáskor apró fehér csillanás, hogy a sebzés látsszon
-    if (flash) {
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(-16, -6, 4, 0, TAU);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(16, -6, 4, 0, TAU);
-      ctx.fill();
-    }
-
-    // Dühös szemöldök (fekete, befelé-lefelé dőlő) — a „mérges" kifejezés
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 6;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-28, -22);
-    ctx.lineTo(-6, -12);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(28, -22);
-    ctx.lineTo(6, -12);
-    ctx.stroke();
-
-    // Száj — tömör fekete, morgó (széles nyitott)
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.ellipse(0, 16, 17, 11, 0, 0, TAU);
-    ctx.fill();
-
-    // Két alsó agyar a fekete szájból
-    ctx.fillStyle = '#fff';
-    for (const s of [-1, 1]) {
-      ctx.beginPath();
-      ctx.moveTo(s * 9, 22);
-      ctx.lineTo(s * 6, 14);
-      ctx.lineTo(s * 12, 14);
-      ctx.closePath();
-      ctx.fill();
-    }
+  protected override hasArms(): boolean {
+    return true;
   }
 
-  /** Két kar a test két oldalán, a végükön ököl. */
-  protected override drawArms(ctx: CanvasRenderingContext2D, flash: boolean): void {
-    const armCol = flash ? '#ffdede' : '#7a1422';
-    const fistCol = flash ? '#ffffff' : '#4a0c16';
-    for (const s of [-1, 1]) {
-      // felkar: a test oldaláról kifelé-lefelé
-      ctx.strokeStyle = armCol;
-      ctx.lineWidth = 13;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(s * (this.r * 0.6), 8);
-      ctx.lineTo(s * (this.r * 1.25), 30);
-      ctx.stroke();
+  override draw(ctx: CanvasRenderingContext2D): void {
+    drawEnemy(ctx, {
+      kind: 'boss3',
+      x: this.x,
+      y: this.y,
+      r: this.r,
+      col: this.col,
+      col2: this.col2,
+      flash: this.flash > 0,
+      bob: this.bob,
+      wob: this.wob,
+      face: this.state === 'dash' ? Math.atan2(this.cvy, this.cvx) : 0,
+      moving: this.state === 'dash' || !this.entering,
+      charge: this.state === 'dash' ? 'dash' : 'idle',
+      active: this.shootCd < 0.4,
+      arms: true,
+    });
 
-      // ököl a kar végén
-      ctx.fillStyle = fistCol;
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(s * (this.r * 1.25), 30, 12, 0, TAU);
-      ctx.fill();
-      ctx.stroke();
-
-      // két bütyök az öklön
-      ctx.fillStyle = '#000';
-      for (const k of [-1, 1]) {
-        ctx.beginPath();
-        ctx.arc(s * (this.r * 1.25) + k * 4, 26, 1.6, 0, TAU);
-        ctx.fill();
-      }
+    // HP-csík (Boss3 speciális szín)
+    if (this.hp < this.maxHp) {
+      const w = this.r * 2.2;
+      const x = this.x - w / 2;
+      const y = this.y - this.r - 14;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(x, y, w, 5);
+      ctx.fillStyle = '#ff2a4a';
+      ctx.fillRect(x, y, w * clamp(this.hp / this.maxHp, 0, 1), 5);
     }
   }
 }

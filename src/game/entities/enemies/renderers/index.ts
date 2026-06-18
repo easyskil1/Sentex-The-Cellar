@@ -54,6 +54,7 @@ import { drawBanshee } from './banshee';
 import { drawImp } from './imp';
 import { drawHydra } from './hydra';
 import { drawWerewolf } from './werewolf';
+import { drawBossBeast } from './bossBeast';
 
 export type { EnemyVisual };
 
@@ -114,6 +115,9 @@ export function drawEnemy(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
     case 'imp': return drawImp(ctx, v);
     case 'hydra': return drawHydra(ctx, v);
     case 'werewolf': return drawWerewolf(ctx, v);
+    case 'boss':
+    case 'boss3':
+      return drawBossBeast(ctx, v);
     default: return drawBlob(ctx, v);
   }
 }

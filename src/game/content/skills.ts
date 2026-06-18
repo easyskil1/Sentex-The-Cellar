@@ -3,7 +3,7 @@ import { clamp } from '../../engine/math';
 import { HP } from '../config';
 
 /**
- * Aktív képesség (Isaac „active item" mintára). Space/E gombbal sül el, és
+ * Aktív képesség (klasszikus „active item" mintára). Space/E gombbal sül el, és
  * szobánként töltődik (`chargeMax` szoba kell egy használathoz).
  *
  * Új skill: adj egy bejegyzést ide, és tedd elérhetővé tárgyként (items.ts)

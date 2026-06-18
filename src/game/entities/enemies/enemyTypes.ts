@@ -217,7 +217,7 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
 /**
  * Champion-variáns trait (Wave 3): bármely alap-ellenfél ritkán „championként"
  * jön — szívósabb, átszínezett, és EGY extra tulajdonsággal. Egy rendszer →
- * az egész roszter változatosabb (Binding of Isaac-minta).
+ * az egész roszter változatosabb (roguelike-minta).
  *   tough     — sokkal több HP, kissé lassabb
  *   swift     — sokkal gyorsabb
  *   giant     — nagyobb test, +HP, +érintés-sebzés

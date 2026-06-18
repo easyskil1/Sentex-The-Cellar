@@ -3,7 +3,7 @@ import type { AudioManager } from '../engine/Audio';
 import type { Input } from '../engine/Input';
 import type { Overlays, OverlayAction } from '../ui/Overlays';
 
-import { World, type OfferView } from './World';
+import { World, type OfferView, type HubChoice } from './World';
 import { drawHUD } from './HUD';
 import {
   loadProfile,
@@ -16,6 +16,8 @@ import {
   type Profile,
 } from './progression';
 import { loadStats, loadRecords, commitRun, resetAllStats } from './stats';
+import { loadMusicVolume, saveMusicVolume, loadSfxVolume, saveSfxVolume, loadBinds, saveBinds, loadFpsShown, saveFpsShown, loadRenderScale, saveRenderScale, saveFullscreenPref } from './settings';
+import { DEFAULT_BINDS, type InputAction } from '../engine/Input';
 import { generateLabyrinth } from './level/labyrinth';
 import { CHAPTERS, resolveLevel } from './level/levels';
 
@@ -23,8 +25,8 @@ type GameState = 'menu' | 'play' | 'pause' | 'over' | 'offer';
 
 /**
  * A legfelső szintű játékvezérlő: állapotgép (menü / játék / szünet /
- * game over / ajánlat), amely az engine update–render hívásait a megfelelő
- * helyre irányítja, és kezeli a felületet.
+ * game over), amely az engine update–render hívásait a megfelelő helyre
+ * irányítja, és kezeli a felületet.
  */
 export class Game implements EngineCallbacks {
   private state: GameState = 'menu';
@@ -34,7 +36,7 @@ export class Game implements EngineCallbacks {
   /** A helyi karakter-profil (név); `null`, amíg nincs megadva. */
   private profile: Profile | null;
   /** Melyik menü-képernyő aktív (a `menu` állapoton belül). */
-  private menuScreen: 'main' | 'rank' | 'settings' = 'main';
+  private menuScreen: 'main' | 'rank' | 'settings' | 'credits' = 'main';
   /** Megy-e épp a főmenü narrátora (a gomb szándék-állapota, nem a dekódolásé). */
   private narrationOn = false;
 
@@ -50,11 +52,30 @@ export class Game implements EngineCallbacks {
     });
     this.best = loadProgress().bestFloor;
     this.profile = loadProfile();
-    // mentett hang-beállítás visszatöltése
+    // mentett beállítások visszatöltése (hang, hangerő, billentyű-kiosztás;
+    // az árnyék/rázás a World-ben töltődik). A némítás külön kulcsban él.
     if (localStorage.getItem('sentex_muted') === '1') this.audio.setMuted(true);
+    this.audio.setMusicVolume(loadMusicVolume());
+    this.audio.setSfxVolume(loadSfxVolume());
+    this.input.setBinds(loadBinds());
 
     this.overlays.onAction = (a) => this.handleAction(a);
     this.overlays.onNameSubmit = (name) => this.handleNameSubmit(name);
+    // Beállítás-csúszkák: azonnal alkalmaz + ment (újrarajzolás nélkül, hogy a
+    // húzás folyamatos maradjon). A billentyű-átkötés viszont újrarajzol.
+    this.overlays.onMusicVolume = (v) => { this.audio.setMusicVolume(v); saveMusicVolume(v); };
+    this.overlays.onSfxVolume = (v) => { this.audio.setSfxVolume(v); saveSfxVolume(v); };
+    this.overlays.onShake = (v) => this.world.setShakeScale(v);
+    this.overlays.onRebind = (action: InputAction, key) => {
+      this.input.setBind(action, key);
+      saveBinds(this.input.bindings());
+      this.showSettings();   // friss kiosztás kirajzolása (esetleges csere is látszik)
+    };
+    this.overlays.onResetBinds = () => {
+      this.input.setBinds({ ...DEFAULT_BINDS });
+      saveBinds(this.input.bindings());
+      this.showSettings();
+    };
     // A narrátor természetes végén a főmenü-gomb visszaáll „lejátszás" állapotba.
     this.audio.setVoiceEndedHandler((name) => {
       if (name !== 'narrator') return;
@@ -64,6 +85,8 @@ export class Game implements EngineCallbacks {
     // World-beli KAPU: a játékos rálépett → a valódi karakterrel a labirintusba
     // (a world.startLabyrinth-en át), majd a kijáratnál vissza a kapuhoz.
     this.world.onEnterLabyrinth = () => this.enterLabyrinthFromWorld();
+    // Hub-portál: a játékos egy NYITOTT portálra lépett → indítjuk a módot.
+    this.world.onHubChoice = (id) => this.handleHubChoice(id);
 
     // Háttérnek mindig legyen érvényes pálya a menü mögött is.
     this.world.newGame();
@@ -71,6 +94,14 @@ export class Game implements EngineCallbacks {
   }
 
   update(dt: number): void {
+    this.updateMusic();
+    // Hub (mód-választó, a world belsejében fut): ESC = vissza a főmenübe.
+    if (this.world.isHub) {
+      if (this.input.consumePause()) { this.showMenu(); return; }
+      this.world.update(dt);
+      return;
+    }
+
     // Labirintus (a world belsejében fut): ESC = kilépés, egyébként a normál world-update.
     if (this.world.isLabyrinth) {
       if (this.input.consumePause()) { this.world.exitLabyrinth(); return; }
@@ -92,6 +123,33 @@ export class Game implements EngineCallbacks {
     }
   }
 
+  /** Fejezet-id → (calm, combat) zene-track. A calm a fejezet saját hangulata
+   *  (ismeretlennél a Mélység), a combat fejezetenként váltakozik (A/B) a változatosságért. */
+  private musicForChapter(id: string): { calm: string; combat: string } {
+    const calmKnown = ['pince', 'ureg', 'melyseg', 'necropolis', 'dragonlair'];
+    const calm = calmKnown.includes(id) ? id : 'melyseg';
+    const combatB = id === 'ureg' || id === 'necropolis';
+    return { calm, combat: combatB ? 'combat2' : 'combat1' };
+  }
+
+  /**
+   * A zenei TÉMA vezérlése a játékállapotból (minden képkockában; a setMusicTheme
+   * csak váltáskor cserél decket). Főmenü/hub/game-over → nyugodt menü-zene; harci
+   * szoba/labirintus → a fejezet calm+combat párja. Szünet/ajánlat alatt a futó
+   * témát nem szakítjuk meg. Az intenzitás-crossfade-et a World adja (setMusicScene).
+   */
+  private updateMusic(): void {
+    const s = this.state;
+    if (s === 'pause' || s === 'offer') return;
+    if (this.world.isHub) { this.audio.setMusicTheme('menu', null); return; }
+    if (s === 'play') {
+      const { calm, combat } = this.musicForChapter(this.world.chapterId);
+      this.audio.setMusicTheme(calm, combat);
+      return;
+    }
+    this.audio.setMusicTheme('menu', null);
+  }
+
   render(ctx: CanvasRenderingContext2D): void {
     if (this.state === 'menu') {
       this.drawMenuBackground(ctx);
@@ -99,7 +157,8 @@ export class Game implements EngineCallbacks {
       this.world.render(ctx);
     }
 
-    if (this.state === 'play' || this.state === 'pause' || this.state === 'offer') {
+    // A hubban (mód-választó) nincs harci HUD — a saját címsora/portáljai jelzik.
+    if (!this.world.isHub && (this.state === 'play' || this.state === 'pause' || this.state === 'offer')) {
       drawHUD(ctx, this.world, this.best, this.engine.width, this.engine.height);
     }
   }
@@ -140,8 +199,36 @@ export class Game implements EngineCallbacks {
       case 'settings':
         this.showSettings();
         break;
+      case 'credits':
+        this.showCredits();
+        break;
       case 'narrator':
         this.toggleNarration();
+        break;
+      case 'shadow-off':
+        this.world.setShadowMode('off');
+        break;
+      case 'shadow-hard':
+        this.world.setShadowMode('hard');
+        break;
+      case 'shadow-soft':
+        this.world.setShadowMode('soft');
+        break;
+      case 'rscale-100':
+        this.engine.setRenderScale(1); saveRenderScale(1);
+        break;
+      case 'rscale-75':
+        this.engine.setRenderScale(0.75); saveRenderScale(0.75);
+        break;
+      case 'rscale-50':
+        this.engine.setRenderScale(0.5); saveRenderScale(0.5);
+        break;
+      case 'toggle-fullscreen':
+        this.toggleFullscreen();
+        break;
+      case 'toggle-fps':
+        saveFpsShown(!loadFpsShown());
+        this.showSettings();   // a kapcsoló-állás azonnal frissül a lapon
         break;
       case 'toggle-audio': {
         const muted = this.audio.toggleMute();
@@ -202,11 +289,40 @@ export class Game implements EngineCallbacks {
     this.world.startLabyrinth(generateLabyrinth(ch.labyrinth), ch.theme, ch.enemyKinds, ch.id);
   }
 
+  /** Főmenü „Start": a HUB-terembe lépünk (mód-választó), nem egyből a történetbe. */
   private startGame(): void {
     this.audio.resume();
-    this.world.newGame();
+    this.enterHub();
+  }
+
+  /** Belépés a hub-terembe (a play-állapoton belül fut, mint a labirintus). */
+  private enterHub(): void {
+    this.world.startHub();
     this.state = 'play';
     this.overlays.hideAll();
+  }
+
+  /**
+   * Egy hub-portál választása. Csak NYITOTT portálra hívódik (a zárt Dungeon/Boss
+   * „hamarosan" jelzését a World maga adja). A Labirintus a hubból FRISS
+   * karakterrel indul, és a kijáratnál visszatér a hubba.
+   */
+  private handleHubChoice(id: HubChoice): void {
+    this.audio.resume();
+    if (id === 'story') {
+      this.world.newGame();
+      this.state = 'play';
+      this.overlays.hideAll();
+    } else if (id === 'labyrinth') {
+      const ch = CHAPTERS.find((c) => c.labyrinth);
+      if (!ch?.labyrinth) return;
+      this.world.newGame();                       // friss karakter a hub-futáshoz
+      this.world.onLabyrinthExit = () => this.enterHub(); // kijáratnál vissza a hubba
+      this.world.startLabyrinth(generateLabyrinth(ch.labyrinth), ch.theme, ch.enemyKinds, ch.id);
+      this.state = 'play';
+      this.overlays.hideAll();
+    }
+    // 'dungeon' / 'boss': zárt — a World már jelezte; itt nincs teendő.
   }
 
   /** Főmenü narrátor-gomb: lejátszás indítása, ill. ha már szól, leállítása. */
@@ -219,6 +335,7 @@ export class Game implements EngineCallbacks {
   }
 
   private showMenu(): void {
+    this.world.exitHub();        // ha a hubból léptünk ki, a háttér visszaáll normál szobára
     this.audio.stopVoice();      // menübe lépve ne szóljon tovább a narráció
     this.narrationOn = false;
     this.state = 'menu';
@@ -268,7 +385,31 @@ export class Game implements EngineCallbacks {
   /** BEÁLLÍTÁSOK lap (a menü-állapoton belül). */
   private showSettings(): void {
     this.menuScreen = 'settings';
-    this.overlays.showSettings({ muted: this.audio.isMuted });
+    this.overlays.showSettings({
+      muted: this.audio.isMuted,
+      shadowMode: this.world.shadowMode,
+      shake: this.world.shakeScale,
+      musicVolume: this.audio.musicVolume,
+      sfxVolume: this.audio.sfxVolume,
+      binds: this.input.bindings(),
+      fpsShown: loadFpsShown(),
+      renderScale: loadRenderScale(),
+      fullscreen: !!document.fullscreenElement,
+    });
+  }
+
+  /** Teljes képernyő be/ki (böngésző Fullscreen API); a kapcsoló-állás a lapon frissül. */
+  private toggleFullscreen(): void {
+    const want = !document.fullscreenElement;
+    saveFullscreenPref(want);   // a választás megmarad a következő indításra is
+    const p = want ? document.documentElement.requestFullscreen() : document.exitFullscreen();
+    p?.then(() => { if (this.menuScreen === 'settings') this.showSettings(); }).catch(() => {});
+  }
+
+  /** KÖZREMŰKÖDŐK lap (zene/kód forrásai + licenc). */
+  private showCredits(): void {
+    this.menuScreen = 'credits';
+    this.overlays.showCredits();
   }
 
   /** A jelenleg nyitott menü-képernyő újrarajzolása (név-szerkesztés/reset után). */

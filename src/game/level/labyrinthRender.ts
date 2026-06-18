@@ -4,6 +4,8 @@
  * (`ox`,`oy`) a bal-felső eltolás — így ugyanaz a kód rajzol kicsiben (előnézet)
  * és nagyban (játék, görgetve), SOSEM összenyomva (a tile mindig négyzetes).
  */
+import { ROOM } from '../config';
+import type { Rect } from '../types';
 import type { Theme } from './theme';
 import type { Labyrinth } from './labyrinth';
 
@@ -89,4 +91,96 @@ function marker(
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
   }
+}
+
+// ---------------------------------------------------------------------------
+// In-game labirintus-jelenet levél-rajzolói (a World `renderLabyrinth`-ja hívja).
+// A kamera-orchesztrálás (clip, translate, entitások) a World-ben marad; ezek a
+// maze-specifikus, állapotmentes darabok explicit paraméterekkel dolgoznak.
+// ---------------------------------------------------------------------------
+
+/** Fal-tile-ok a látható ablakra (felső világos perem / alsó él-árnyék). */
+export function drawLabWalls(
+  ctx: CanvasRenderingContext2D,
+  theme: Theme,
+  c0: number, c1: number, r0: number, r1: number,
+  isWall: (col: number, row: number) => boolean,
+): void {
+  const TILE = ROOM.TILE;
+  for (let row = r0; row <= r1; row++) {
+    for (let col = c0; col <= c1; col++) {
+      if (!isWall(col, row)) continue;
+      const x = col * TILE;
+      const y = row * TILE;
+      ctx.fillStyle = theme.wall;
+      ctx.fillRect(x, y, TILE, TILE);
+      if (!isWall(col, row - 1)) { // felső világos perem, ha fölötte folyosó
+        ctx.fillStyle = theme.wallTop;
+        ctx.fillRect(x, y, TILE, 6);
+      }
+      if (!isWall(col, row + 1)) { // alsó él-árnyék, ha alatta folyosó
+        ctx.fillStyle = theme.wallEdge;
+        ctx.fillRect(x, y + TILE - 5, TILE, 5);
+      }
+    }
+  }
+}
+
+/** A kijárat (csapóajtó) — lüktető akcentus + ▼ jel. */
+export function drawLabExit(ctx: CanvasRenderingContext2D, exitCol: number, exitRow: number, accent: string): void {
+  const TILE = ROOM.TILE;
+  const x = exitCol * TILE;
+  const y = exitRow * TILE;
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 250);
+  ctx.save();
+  ctx.globalAlpha = 0.35 + 0.35 * pulse;
+  ctx.fillStyle = accent;
+  ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#10100a';
+  ctx.font = '700 30px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('▼', x + TILE / 2, y + TILE / 2 + 2);
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
+  ctx.restore();
+}
+
+/** A pálya-keret (fal-szegély) a doboz körül — a normál pálya kinézete. */
+export function drawLabFrame(ctx: CanvasRenderingContext2D, box: Rect, theme: Theme): void {
+  const W = ROOM.WALL;
+  ctx.fillStyle = theme.wall;
+  ctx.fillRect(box.x - W, box.y - W, box.w + 2 * W, W);
+  ctx.fillRect(box.x - W, box.y + box.h, box.w + 2 * W, W);
+  ctx.fillRect(box.x - W, box.y, W, box.h);
+  ctx.fillRect(box.x + box.w, box.y, W, box.h);
+  ctx.fillStyle = theme.wallTop;
+  ctx.fillRect(box.x - W, box.y - W, box.w + 2 * W, 5);
+  ctx.strokeStyle = theme.wallEdge;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(box.x - 1, box.y - 1, box.w + 2, box.h + 2);
+}
+
+/** Alsó tipp + „LABYRINTH COMPLETE" felvillanás. */
+export function drawLabOverlay(ctx: CanvasRenderingContext2D, box: Rect, won: boolean): void {
+  ctx.save();
+  ctx.font = '600 14px system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(243, 226, 191, 0.85)';
+  ctx.textAlign = 'center';
+  ctx.fillText('WASD: move · shoot · ESC: back · find the ▼ exit', box.x + box.w / 2, box.y + box.h + 22);
+  ctx.textAlign = 'start';
+
+  if (won) {
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+    ctx.fillStyle = 'rgba(5, 4, 10, 0.6)';
+    ctx.fillRect(box.x, box.y, box.w, box.h);
+    ctx.fillStyle = '#3fd87a';
+    ctx.font = '800 42px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('LABYRINTH COMPLETE!', cx, cy - 8);
+    ctx.textAlign = 'start';
+  }
+  ctx.restore();
 }
