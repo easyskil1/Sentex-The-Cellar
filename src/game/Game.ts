@@ -16,12 +16,14 @@ import {
   type Profile,
 } from './progression';
 import { loadStats, loadRecords, commitRun, resetAllStats } from './stats';
-import { loadMusicVolume, saveMusicVolume, loadSfxVolume, saveSfxVolume, loadBinds, saveBinds, loadFpsShown, saveFpsShown, loadRenderScale, saveRenderScale, saveFullscreenPref, loadGameFeel, saveGameFeel, loadHitStop, saveHitStop } from './settings';
+import { resetBestiary } from './bestiary';
+import { loadMusicVolume, saveMusicVolume, loadSfxVolume, saveSfxVolume, loadBinds, saveBinds, loadFpsShown, saveFpsShown, loadRenderScale, saveRenderScale, saveFullscreenPref, loadGameFeel, saveGameFeel, loadHitStop, saveHitStop, loadThickTears, saveThickTears } from './settings';
 import { DEFAULT_BINDS, type InputAction } from '../engine/Input';
 import { generateLabyrinth } from './level/labyrinth';
 import { CHAPTERS, resolveLevel, chapterName } from './level/levels';
+import type { AdminController, AdminHost } from './adminHook';
 
-type GameState = 'menu' | 'play' | 'pause' | 'over' | 'offer';
+type GameState = 'menu' | 'play' | 'pause' | 'over' | 'admin' | 'offer';
 
 /**
  * A legfelső szintű játékvezérlő: állapotgép (menü / játék / szünet /
@@ -36,9 +38,11 @@ export class Game implements EngineCallbacks {
   /** A helyi karakter-profil (név); `null`, amíg nincs megadva. */
   private profile: Profile | null;
   /** Melyik menü-képernyő aktív (a `menu` állapoton belül). */
-  private menuScreen: 'main' | 'rank' | 'settings' | 'credits' = 'main';
+  private menuScreen: 'main' | 'rank' | 'bestiary' | 'settings' | 'credits' = 'main';
   /** Megy-e épp a főmenü narrátora (a gomb szándék-állapota, nem a dekódolásé). */
   private narrationOn = false;
+  /** Dev-only admin-vezérlő; a `main.ts` regisztrálja (production buildben null marad). */
+  private admin: AdminController | null = null;
 
   constructor(
     private readonly engine: Engine,
@@ -111,13 +115,16 @@ export class Game implements EngineCallbacks {
     }
 
     if (this.input.consumePause()) {
+      if (this.state === 'admin') this.showMenu();
       // a felugró ajánlat-ablak ESC-re (vagy P-re) bezárul = elutasítás
-      if (this.state === 'offer') this.handleAction('offer-decline');
+      else if (this.state === 'offer') this.handleAction('offer-decline');
       else this.togglePause();
     }
 
     if (this.state === 'play') {
       this.world.update(dt);
+    } else if (this.state === 'admin') {
+      this.admin?.update();
     } else {
       // menü / szünet / game over: csak az effektek élnek
       this.world.updateAmbient(dt);
@@ -136,12 +143,12 @@ export class Game implements EngineCallbacks {
   /**
    * A zenei TÉMA vezérlése a játékállapotból (minden képkockában; a setMusicTheme
    * csak váltáskor cserél decket). Főmenü/hub/game-over → nyugodt menü-zene; harci
-   * szoba/labirintus → a fejezet calm+combat párja. Szünet/ajánlat alatt a
+   * szoba/labirintus → a fejezet calm+combat párja. Szünet/ajánlat/admin alatt a
    * futó témát nem szakítjuk meg. Az intenzitás-crossfade-et a World adja (setMusicScene).
    */
   private updateMusic(): void {
     const s = this.state;
-    if (s === 'pause' || s === 'offer') return;
+    if (s === 'pause' || s === 'offer' || s === 'admin') return;
     if (this.world.isHub) { this.audio.setMusicTheme('menu', null); return; }
     if (s === 'play') {
       const { calm, combat } = this.musicForChapter(this.world.chapterId);
@@ -152,6 +159,11 @@ export class Game implements EngineCallbacks {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    if (this.state === 'admin') {
+      this.admin?.render(ctx, this.engine.width, this.engine.height);
+      return;
+    }
+
     if (this.state === 'menu') {
       this.drawMenuBackground(ctx);
     } else {
@@ -177,7 +189,7 @@ export class Game implements EngineCallbacks {
 
     // Finom atmoszférikus köd/részecskék
     this.world.particles.draw(ctx);
-
+    
     // Egy kis díszítő keret vagy fénycsík az alján
     ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
     ctx.fillRect(0, h - 100, w, 100);
@@ -194,8 +206,14 @@ export class Game implements EngineCallbacks {
       case 'menu':
         this.showMenu();
         break;
+      case 'admin':
+        this.showAdmin();
+        break;
       case 'rank':
         this.showRank();
+        break;
+      case 'bestiary':
+        this.showBestiary();
         break;
       case 'settings':
         this.showSettings();
@@ -245,6 +263,10 @@ export class Game implements EngineCallbacks {
         this.showSettings();
         break;
       }
+      case 'toggle-thicktears':
+        saveThickTears(!loadThickTears());   // a következő lövésektől nagyobb sugár
+        this.showSettings();
+        break;
       case 'toggle-audio': {
         const muted = this.audio.toggleMute();
         localStorage.setItem('sentex_muted', muted ? '1' : '0');
@@ -254,12 +276,23 @@ export class Game implements EngineCallbacks {
         if (confirm('Really reset your total score, rank, leaderboard, records and stats? Your character name is kept.')) {
           resetAllProgress();
           resetAllStats();
+          resetBestiary();
           this.best = 0;
           this.refreshMenuScreen();
         }
         break;
       case 'edit-name':
         this.overlays.showNameModal(this.profile?.name ?? '');
+        break;
+      case 'admin-map':
+      case 'admin-enemy':
+      case 'admin-boss':
+      case 'admin-item':
+      case 'admin-skill':
+      case 'admin-odds':
+      case 'admin-balance':
+      case 'admin-settings':
+        this.admin?.action(action);
         break;
       case 'offer-accept':
         this.world.acceptOffer();
@@ -285,6 +318,28 @@ export class Game implements EngineCallbacks {
     this.engine.resetClock();
   }
 
+  /** A dev-only admin-vezérlő regisztrálása (a `main.ts` dev-ága hívja, lazán betöltve). */
+  registerAdmin(controller: AdminController): void {
+    this.admin = controller;
+  }
+
+  /** Az adminnak nyújtott szolgáltatások (a controller a host-on át éri el a játékot). */
+  adminHost(): AdminHost {
+    return {
+      world: this.world,
+      audio: this.audio,
+      input: this.input,
+      overlays: this.overlays,
+      enterPlay: () => { this.state = 'play'; this.overlays.hideAll(); },
+      setAdminState: () => { this.state = 'admin'; },
+    };
+  }
+
+  private showAdmin(): void {
+    // Production buildben nincs admin (a controller null) → nincs belépés.
+    this.admin?.open();
+  }
+
   /** A world-beli kapu indítja: a VALÓDI karaktert a labirintusba dobja, majd vissza a kapuhoz. */
   private enterLabyrinthFromWorld(): void {
     const ch = CHAPTERS.find((c) => c.labyrinth);
@@ -304,9 +359,11 @@ export class Game implements EngineCallbacks {
     this.world.startLabyrinth(generateLabyrinth(ch.labyrinth), ch.theme, ch.enemyKinds, ch.id);
   }
 
+
   /** Főmenü „Start": a HUB-terembe lépünk (mód-választó), nem egyből a történetbe. */
   private startGame(): void {
     this.audio.resume();
+    this.admin?.close();
     this.enterHub();
     // Nim narrációja kikapcsolva (kérésre).
   }
@@ -351,6 +408,7 @@ export class Game implements EngineCallbacks {
   }
 
   private showMenu(): void {
+    this.admin?.close();
     this.world.exitHub();        // ha a hubból léptünk ki, a háttér visszaáll normál szobára
     this.audio.stopVoice();      // menübe lépve ne szóljon tovább a narráció
     this.narrationOn = false;
@@ -398,6 +456,12 @@ export class Game implements EngineCallbacks {
     });
   }
 
+  /** BESTIÁRIUM lap: feloldható ellenfél-gyűjtemény (a menü-állapoton belül). */
+  private showBestiary(): void {
+    this.menuScreen = 'bestiary';
+    this.overlays.showBestiary();
+  }
+
   /** BEÁLLÍTÁSOK lap (a menü-állapoton belül). */
   private showSettings(): void {
     this.menuScreen = 'settings';
@@ -413,6 +477,7 @@ export class Game implements EngineCallbacks {
       fullscreen: !!document.fullscreenElement,
       gameFeel: loadGameFeel(),
       hitStop: loadHitStop(),
+      thickTears: loadThickTears(),
     });
   }
 
@@ -433,6 +498,7 @@ export class Game implements EngineCallbacks {
   /** A jelenleg nyitott menü-képernyő újrarajzolása (név-szerkesztés/reset után). */
   private refreshMenuScreen(): void {
     if (this.menuScreen === 'rank') this.showRank();
+    else if (this.menuScreen === 'bestiary') this.showBestiary();
     else if (this.menuScreen === 'settings') this.showSettings();
     else this.showMenu();
   }

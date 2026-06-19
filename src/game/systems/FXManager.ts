@@ -20,11 +20,32 @@ export class FXManager {
   /** Kamera-kick eltolás (lövéskor a lövés ELLEN rúg, majd visszalendül). */
   kickX = 0;
   kickY = 0;
+  /**
+   * Kamera-LERP (#70): a nézet finoman a CÉLZÁS irányába csúszik (a kickkel
+   * ellentétben tartós, amíg lősz; lövés nélkül lágyan középre húz). Külön a
+   * kicktől, mert más a karaktere (lassú lerp vs. rugós rántás).
+   */
+  lookX = 0;
+  lookY = 0;
+  private lookTargetX = 0;
+  private lookTargetY = 0;
 
-  /** Game-feel kapcsoló (Beállítások · Grafika); kikapcsoláskor a kick lecseng. */
+  /** Game-feel kapcsoló (Beállítások · Grafika); kikapcsoláskor a kick+lerp lecseng. */
   setGameFeel(v: boolean): void {
     this.gameFeel = v;
-    if (!v) { this.kickX = 0; this.kickY = 0; }
+    if (!v) { this.kickX = 0; this.kickY = 0; this.lookTargetX = 0; this.lookTargetY = 0; }
+  }
+
+  /**
+   * Kamera-LERP célzás-cél beállítása (a Player.shoot hívja az aktuális lövés-
+   * iránnyal). A nézet ennek a kis eltolásnak a felé simul; ha nem lősz, a cél
+   * magától visszahúz 0-ra (lásd tickShake). Csak ha a game-feel BE van.
+   */
+  setCamLook(dirX: number, dirY: number): void {
+    if (!this.gameFeel) return;
+    const D = 9; // finom eltolás px-ben (szándékosan kicsi, hogy ne legyen szédítő)
+    this.lookTargetX = dirX * D;
+    this.lookTargetY = dirY * D;
   }
 
   /**
@@ -39,11 +60,11 @@ export class FXManager {
 
   /** A teljes kamera-eltolás X-ben: rázás-jitter + kick (a render olvassa). */
   camOffX(): number {
-    return (this.shake > 0 ? rand(-this.shake, this.shake) * 0.5 : 0) + this.kickX;
+    return (this.shake > 0 ? rand(-this.shake, this.shake) * 0.5 : 0) + this.kickX + this.lookX;
   }
-  /** A teljes kamera-eltolás Y-ban: rázás-jitter + kick. */
+  /** A teljes kamera-eltolás Y-ban: rázás-jitter + kick + célzás-lerp. */
   camOffY(): number {
-    return (this.shake > 0 ? rand(-this.shake, this.shake) * 0.5 : 0) + this.kickY;
+    return (this.shake > 0 ? rand(-this.shake, this.shake) * 0.5 : 0) + this.kickY + this.lookY;
   }
 
   /** Új futás / mód-váltás: a lebegő szövegek törlése. */
@@ -118,6 +139,13 @@ export class FXManager {
       if (Math.abs(this.kickX) < 0.05) this.kickX = 0;
       if (Math.abs(this.kickY) < 0.05) this.kickY = 0;
     }
+    // kamera-LERP: a cél lövés nélkül magától középre húz, az eltolás lágyan követi
+    this.lookTargetX *= Math.max(0, 1 - dt * 5);
+    this.lookTargetY *= Math.max(0, 1 - dt * 5);
+    this.lookX += (this.lookTargetX - this.lookX) * Math.min(1, dt * 6);
+    this.lookY += (this.lookTargetY - this.lookY) * Math.min(1, dt * 6);
+    if (Math.abs(this.lookX) < 0.02 && Math.abs(this.lookTargetX) < 0.02) this.lookX = 0;
+    if (Math.abs(this.lookY) < 0.02 && Math.abs(this.lookTargetY) < 0.02) this.lookY = 0;
   }
 
   /** Lebegő szövegek kirajzolása (sebzésszám pop+kontúr, egyéb státusz halványuló). */

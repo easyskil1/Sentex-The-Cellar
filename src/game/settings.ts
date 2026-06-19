@@ -74,6 +74,21 @@ export function saveHitStop(v: boolean): void {
   localStorage.setItem(HITSTOP_KEY, v ? '1' : '0');
 }
 
+/**
+ * Vastagabb játékos-lövedék (#68): hozzáférhetőség/láthatóság - a könnyek nagyobb
+ * sugárral RAJZOLÓDNAK, de az ÜTKÖZÉSI sugár marad (nem csalás, csak jobban látszik).
+ * Alap: KI. Modul-szintű gyorsítótár, hogy a Tear képkockánként ne olvasson localStorage-ot.
+ */
+const THICKTEARS_KEY = 'sentex_thicktears';
+let thickTears = localStorage.getItem(THICKTEARS_KEY) === '1';
+export function loadThickTears(): boolean { return thickTears; }
+export function saveThickTears(v: boolean): void {
+  thickTears = v;
+  localStorage.setItem(THICKTEARS_KEY, v ? '1' : '0');
+}
+/** A könny-sugár szorzója a kapcsoló szerint (a Tear olvassa konstrukciókor). */
+export function tearRadiusMul(): number { return thickTears ? 1.6 : 1; }
+
 /** Render-felbontás szorzó (teljesítmény ↔ élesség): 1 / 0.75 / 0.5. Alap: teljes. */
 const RSCALE_KEY = 'sentex_rscale';
 export function loadRenderScale(): number {

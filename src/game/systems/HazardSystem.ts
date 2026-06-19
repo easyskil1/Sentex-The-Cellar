@@ -2,6 +2,7 @@ import type { World } from '../World';
 import type { Hazard, HazardKind } from '../types';
 import { TAU, clamp, dist2 } from '../../engine/math';
 import { HP } from '../config';
+import { Enemy } from '../entities/enemies/Enemy';
 
 /**
  * Talaj-veszélyek rendszere: méreg-/tűz-tócsák, ködfelhők és aknák. Saját
@@ -26,12 +27,19 @@ export class HazardSystem {
   }
 
   /** Talaj-veszély lerakása (ellenfelek hívják: méreg/tűz/köd/akna). */
-  add(kind: HazardKind, x: number, y: number, r: number, life: number, arm = 0): void {
+  add(kind: HazardKind, x: number, y: number, r: number, life: number, arm = 0, owner: 'player' | 'enemy' = 'enemy'): void {
     // a szobán belülre szorítjuk, hogy ne lógjon ki a falba
     const rc = this.w.room;
     x = clamp(x, rc.x + 6, rc.x + rc.w - 6);
     y = clamp(y, rc.y + 6, rc.y + rc.h - 6);
-    this.hazards.push({ kind, x, y, r, life, maxLife: life, age: 0, tick: 0, arm });
+    this.hazards.push({ kind, x, y, r, life, maxLife: life, age: 0, tick: 0, arm, owner });
+  }
+
+  /** Aktív player-tulajdonú tűz-foltok száma (a Lángkúp égő-nyom plafonjához). */
+  playerFireCount(): number {
+    let n = 0;
+    for (const h of this.hazards) if (h.kind === 'fire' && h.owner === 'player') n++;
+    return n;
   }
 
   update(dt: number): void {
@@ -48,7 +56,24 @@ export class HazardSystem {
         continue;
       }
 
-      if (h.kind === 'poison' || h.kind === 'fire') {
+      if (h.kind === 'fire' && h.owner === 'player') {
+        // Lángkúp égő-nyoma: az ELLENFELET sebzi (a játékosra ártalmatlan).
+        if (h.age >= (h.arm ?? 0) && h.tick <= 0) {
+          h.tick = 0.3;
+          let hit = false;
+          for (const e of this.w.currentRoom.enemies) {
+            const reach = h.r + e.r;
+            if (dist2(e.x, e.y, h.x, h.y) >= reach * reach) continue;
+            e.hp -= 80; // enyhe, tartós zóna-sebzés (a kúp-tick a fő forrás)
+            if (!e.boss) e.flash = 0.05;
+            if (e instanceof Enemy) e.applyBurn(2);
+            this.w.addDamage(e.x, e.y - e.r, 80, { color: '#ff9a3a' });
+            if (e.hp <= 0) this.w.killEnemy(e);
+            hit = true;
+          }
+          if (hit) this.w.particles.spawn(h.x, h.y, '#ff9a3a', 4, 90, 0.25);
+        }
+      } else if (h.kind === 'poison' || h.kind === 'fire') {
         const armed = h.age >= (h.arm ?? 0); // telegraf alatt csak látszik, nem sebez
         const reach = h.r + p.r * 0.4;
         if (armed && p.alive && dist2(p.x, p.y, h.x, h.y) < reach * reach && h.tick <= 0) {
@@ -133,6 +158,75 @@ export class HazardSystem {
           ctx.beginPath();
           ctx.arc(h.x + Math.cos(a) * r * 0.4, h.y + Math.sin(a * 1.3) * r * 0.26, 1.6 + (Math.sin(t * 4 + i) * 0.5 + 0.5) * 2, 0, TAU);
           ctx.fill();
+        }
+      } else if (h.kind === 'fire' && h.owner === 'player') {
+        // Lángkúp égő-nyoma = szépen kidolgozott OLVADT LÁVA-GÖMB: sötét, megszilárdult
+        // kéreg + izzó repedés-hálózat + forró mag + lassan lüktető buborékok. A sötét
+        // kéreg vs. fényes repedés kontraszt teszi valódivá (nem gagyi narancs folt).
+        const cx = h.x, cy = h.y, ry = r * 0.82; // enyhén lapított gömb (talajon ül)
+        const seed = h.x * 0.13 + h.y * 0.07;
+        const pulse = 0.7 + 0.3 * Math.sin(t * 1.8 + seed); // lassú izzás
+
+        // 1) talaj-hőhalo (additív, lágy)
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.32 * fade * pulse;
+        const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.7);
+        halo.addColorStop(0, 'rgba(255,110,30,0.55)');
+        halo.addColorStop(1, 'rgba(150,35,8,0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.7, ry * 1.7, 0, 0, TAU); ctx.fill();
+
+        // 2) sötét kéreg-gömb, gömbszerű árnyékolással (forró bal-fent → sötét jobb-lent)
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = fade;
+        const crust = ctx.createRadialGradient(cx - r * 0.28, cy - ry * 0.3, r * 0.1, cx, cy, r);
+        crust.addColorStop(0, '#7a2f12');
+        crust.addColorStop(0.5, '#3e1a0a');
+        crust.addColorStop(0.85, '#23100a');
+        crust.addColorStop(1, '#160a07');
+        ctx.fillStyle = crust;
+        ctx.beginPath(); ctx.ellipse(cx, cy, r, ry, 0, 0, TAU); ctx.fill();
+
+        // 3) izzó forró mag a kéreg alól (gömb-belső)
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = fade * pulse;
+        const coreG = ctx.createRadialGradient(cx - r * 0.18, cy - ry * 0.2, 0, cx, cy, r * 0.95);
+        coreG.addColorStop(0, 'rgba(255,238,180,0.85)');
+        coreG.addColorStop(0.4, 'rgba(255,120,36,0.5)');
+        coreG.addColorStop(0.75, 'rgba(200,46,12,0.18)');
+        coreG.addColorStop(1, 'rgba(120,20,6,0)');
+        ctx.fillStyle = coreG;
+        ctx.beginPath(); ctx.ellipse(cx, cy, r * 0.95, ry * 0.95, 0, 0, TAU); ctx.fill();
+
+        // 4) izzó repedés-hálózat a kéregben (dupla-stroke: széles-halvány + vékony-fényes)
+        for (let i = 0; i < 6; i++) {
+          const a0 = (i / 6) * TAU + seed * 0.6;
+          ctx.beginPath();
+          for (let s = 0; s <= 4; s++) {
+            const rr = (s / 4) * r * 0.9;
+            const aa = a0 + Math.sin(s * 1.6 + i + seed) * 0.42;
+            const vx = cx + Math.cos(aa) * rr, vy = cy + Math.sin(aa) * rr * 0.82;
+            if (s === 0) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
+          }
+          ctx.lineCap = 'round';
+          ctx.globalAlpha = 0.45 * fade * pulse; ctx.strokeStyle = '#ff5a16'; ctx.lineWidth = 4; ctx.stroke();
+          ctx.globalAlpha = 0.9 * fade;           ctx.strokeStyle = '#ffd874'; ctx.lineWidth = 1.5; ctx.stroke();
+        }
+
+        // 5) lassan lüktető láva-buborékok (forró pontok a repedéseknél)
+        for (let i = 0; i < 3; i++) {
+          const a = seed + i * 2.1;
+          const bd = r * 0.5;
+          const bx = cx + Math.cos(a) * bd, by = cy + Math.sin(a) * bd * 0.82;
+          const bp = 0.5 + 0.5 * Math.sin(t * 2.2 + i * 2.3);
+          const br = 2 + bp * 3.2;
+          ctx.globalAlpha = 0.85 * fade * bp;
+          const bg = ctx.createRadialGradient(bx, by, 0, bx, by, br * 2.2);
+          bg.addColorStop(0, 'rgba(255,242,196,1)');
+          bg.addColorStop(0.5, 'rgba(255,140,44,0.5)');
+          bg.addColorStop(1, 'rgba(255,100,30,0)');
+          ctx.fillStyle = bg;
+          ctx.beginPath(); ctx.arc(bx, by, br * 2.2, 0, TAU); ctx.fill();
         }
       } else if (h.kind === 'fire') {
         ctx.globalAlpha = 0.8 * fade;

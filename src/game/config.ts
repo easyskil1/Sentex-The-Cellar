@@ -53,6 +53,101 @@ export const PLAYER_BASE = {
   sight: 1,
 };
 
+// ── Kénkő-sugár (#1, tartós sugár-lőmód) ────────────────────────────────────
+// A „Kénkő-sugár" relikvia a sima könny-lövést egy FOLYAMATOS, raycast-alapú
+// sugárra cseréli. Tick-sebzés a vonalon álló MINDEN ellenfélre (átütő jelleg),
+// + a játékos elemi flagjei (burn/poison/freeze) a teljes vonalon terjednek (saját
+// csavar). A sebzés a könny-DPS-hez igazodik (dmg/fireRate), hogy egy célon ne
+// legyen erősebb a sima lövésnél; a tömeg-clear az inherens előnye.
+export const BEAM = {
+  /** Sebzés-tick köze másodpercben (kisebb = simább, de több hívás). */
+  tick: 0.09,
+  /** A sugár fél-szélessége px-ben (ennyin belül kap találatot az ellenfél). */
+  width: 15,
+  /** Maximális sugárhossz px-ben (kőnél/falnál ennél hamarabb megáll). */
+  range: 540,
+  /** DPS-szorzó a könny-DPS-hez képest (1 = egy célon azonos a sima lövéssel). */
+  dpsMul: 1.0,
+  /** Vizuális mag-szín (kénkő: izzó vörös-narancs). */
+  core: '#ff5a2a',
+  /** Vizuális ragyogás-szín. */
+  glow: '#ff2a1a',
+};
+
+// ── Lángkúp (#4, „Pokoltüzes lehelet") ──────────────────────────────────────
+// A Lángkúp relikvia a sima könny-lövést egy FOLYAMATOS, közeli kúp-AoE-ra cseréli
+// (lángszóró). A kúpban álló minden ellenfél tick-sebzést kap + beépített `burn`,
+// és a kúp végén égő talaj-nyom marad (saját csavar, player-tulajdonú `fire` hazard).
+// Rövid hatótáv = kockázat (oda kell menni); cserébe ív-AoE + DoT + zóna-kontroll.
+export const FLAME = {
+  /** A kúp hossza px-ben (rövid, a sugár 540-éhez képest). */
+  range: 170,
+  /** A kúp fél-nyílásszöge radiánban (teljes ≈ 2× ennyi). */
+  halfAngle: 0.44,
+  /** Sebzés-tick köze másodpercben. */
+  tick: 0.08,
+  /** DPS-szorzó a könny-DPS-hez képest (a burn DoT a tetejére jön → <1). */
+  dpsMul: 0.8,
+  /** Égő talaj-nyom lerakásának köze másodpercben. */
+  floorEvery: 0.3,
+  /** Egy nyom-folt sugara px-ben. */
+  floorR: 26,
+  /** Egy nyom-folt élettartama másodpercben. */
+  floorLife: 1.8,
+  /** Max egyszerre aktív player-tűz folt (perf + balansz plafon). */
+  floorMax: 6,
+  /** Vizuál: forró mag és láng-szín. */
+  core: '#fff0c0',
+  hot: '#ff9a3a',
+  edge: '#d62a0e',
+};
+
+// ── Felhúzott csapás (#5, töltött lövés) ────────────────────────────────────
+// A „Felhúzott csapás" relikvia a rapid-fire-t felhúzós lövésre cseréli: nyomva
+// tartás TÖLT (chargeT nő), az elengedés ad le EGY felskálázott könnycseppet
+// (nagyobb sebzés + nagyobb test). A sebzés a töltöttséggel arányos. Anti-OP:
+// a szorzó net-DPS-PARITÁSRA van állítva a sima lövéshez (a töltés-idő ELLEN a
+// kihagyott lövésekkel) → a koncentrált burst az előny, nem a net-DPS. A `dpsMul`
+// egy enyhe burst-prémium a töltés-kockázatért (1.0 = tiszta paritás). Lásd
+// `Player.releaseCharge`/`chargeMul` + `World.drawCharge`.
+export const CHARGE = {
+  /** Teljes töltéshez szükséges idő mp-ben. */
+  maxTime: 1.1,
+  /** Ennél rövidebb töltés nem lő (véletlen koccanás-szűrő). */
+  minTime: 0.1,
+  /** Net-DPS szorzó a sima lövéshez képest (1.0 = paritás; >1 = burst-prémium). */
+  dpsMul: 1.2,
+  /** A lövedék test-sugara full töltésnél (×, az alap 6.5 fölött). */
+  sizeMul: 2.3,
+  /** A töltött lövedék sebesség-szorzója (gyorsabb, „nehéz" lövés). */
+  speedMul: 1.15,
+  /** Töltés-gyűrű színe (HUD). */
+  ring: '#ffd24a',
+  /** Töltés-gyűrű ragyogása full töltésnél (HUD). */
+  glow: '#ff8a1a',
+};
+
+// ── Pecsétgyűrű (#2, utazó gyűrű-korong) ────────────────────────────────────
+// A „Pecsétgyűrű" relikvia a sima lövést egy utazó arany pecsét-KORONGRA cseréli
+// (lásd `Ring.ts`). A teljes korong-belseje sebző zóna (terület + áthatolás
+// egyben): minden ellenfelet ÁTHALADVA egyszer sebez. Anti-OP: egy célon a sebzés
+// = sima lövés (`dmg` egyszer), így single-target paritás; a multi-target AoE az
+// inherens előny (a sugár filozófiája). A sebesség/hatótáv a játékos
+// shotSpeed/range-éből jön (a perkek így hatnak rá). Lásd `Player.shootRing`.
+export const RING = {
+  /** A korong sugara px-ben (a teljes belseje sebző zóna). */
+  radius: 44,
+  /** A pecsét-perem vizuális vastagsága px-ben. */
+  bandW: 9,
+  /** Forgás rad/s (tisztán vizuál). */
+  spin: 3.2,
+  /** A korong utazási sebessége a játékos shotSpeed-jéhez képest (×). */
+  speedMul: 0.85,
+  /** Arany pecsét fő-szín + ragyogás. */
+  core: '#d8b24a',
+  glow: '#ffe08a',
+};
+
 export const DUNGEON = {
   /** Szobaszám-alap: target = clamp(BASE + level * PER_LEVEL + 0..2, MIN, MAX). */
   BASE_ROOMS: 8,

@@ -88,6 +88,12 @@ export const ITEMS: readonly Item[] = [
   { name: 'Frost Shard', desc: 'freezes the target', col: '#9fe0ec', col2: '#3a9fc0', shape: 'diamond', pattern: 'bars', apply: (p) => applyPerk(p, 'Frost Shard'), mutateLook: (l) => { l.tearColor = '#a6ecff'; l.iceShadow = true; } },
   { name: 'Lightning Eye', desc: 'chain lightning to nearby', col: '#ffe04a', col2: '#c0a020', shape: 'hexagon', pattern: 'cross', apply: (p) => applyPerk(p, 'Lightning Eye'), mutateLook: (l) => { l.tearColor = '#ffe14a'; l.floatingEye = true; } },
 
+  // Alternatív lőmód (Fázis B: tartalmi tengely)
+  { name: 'Sulfur Beam', desc: 'continuous beam (replaces shots)', col: '#ff5a2a', col2: '#a01818', shape: 'hexagon', pattern: 'cross', apply: (p) => applyPerk(p, 'Sulfur Beam'), mutateLook: (l) => { l.eye = '#ff3a1a'; l.headOutline = '#ff2a1a'; l.tearColor = '#ff5a2a'; } },
+  { name: 'Hellfire Breath', desc: 'flame cone (replaces shots)', col: '#ff9a3a', col2: '#c0401a', shape: 'triangle', pattern: 'split', apply: (p) => applyPerk(p, 'Hellfire Breath'), mutateLook: (l) => { l.eye = '#ff7a1a'; l.headOutline = '#ff6a1a'; l.tearColor = '#ff9a3a'; } },
+  { name: 'Charged Shot', desc: 'charged shot (replaces shots)', col: '#ffd24a', col2: '#c08010', shape: 'diamond', pattern: 'ring', apply: (p) => applyPerk(p, 'Charged Shot'), mutateLook: (l) => { l.eye = '#ffd24a'; l.headOutline = '#ff8a1a'; l.tearColor = '#ffd24a'; } },
+  { name: 'Signet Ring', desc: 'traveling damage ring (replaces shots)', col: '#d8b24a', col2: '#8a6a1a', shape: 'round', pattern: 'ring', apply: (p) => applyPerk(p, 'Signet Ring'), mutateLook: (l) => { l.eye = '#ffe08a'; l.headOutline = '#d8b24a'; l.tearColor = '#d8b24a'; } },
+
   // Kísérők (Wave 4: familiar-rendszer)
   { name: 'Moonstone', desc: 'orbiting damage orb', col: '#aef3ff', col2: '#3a7fd0', shape: 'round', pattern: 'ring', apply: (p) => applyPerk(p, 'Moonstone'), mutateLook: (l) => { l.crescentMark = true; } },
   { name: 'Guardian Fly', desc: 'blocks projectiles', col: '#cfe0ff', col2: '#3a7fd0', shape: 'oval', pattern: 'dot', apply: (p) => applyPerk(p, 'Guardian Fly') }, // a vizuál maga a kísérő-légy (lásd World.drawFamiliars)

@@ -5,6 +5,7 @@ import { ENEMY_STATS, CHAMPION_COLORS, type EnemyKind, type ChampionTrait } from
 import { drawEnemy } from './EnemyRenderer';
 import { NO_SCALE, type EnemyScale } from '../../balance/difficulty';
 import { dispatch } from './behaviors/registry';
+import type { BossTarget } from './bossRegistry';
 
 /** Közös felület minden ellenséghez (alap és boss is ezt valósítja meg). */
 export interface IEnemy {
@@ -18,6 +19,8 @@ export interface IEnemy {
   col2: string;
   readonly boss: boolean;
   readonly score: number;
+  /** Boss-azonosító a bestiárium-feloldáshoz (a World.makeBoss tölti; csak bossnál). */
+  bossId?: BossTarget;
   update(dt: number, world: World): void;
   draw(ctx: CanvasRenderingContext2D): void;
 }
@@ -70,6 +73,8 @@ export class Enemy implements IEnemy {
   buried = false; // Gilista: föld alatt (nem célozható, nem sebez érintésre)
   hideT = 0; // Villanó: rövid eltűnés (nem célozható)
   blockT = 0; // Blokkoló: épp blokkol (a lövéseket elnyeli)
+  champCd = rand(1.5, 3); // champion-affix ütem (shielded blokk-ciklus / summoner idézés)
+  summonsLeft = 3; // summoner champion: hány csatlóst idézhet még (véges)
   baseSpeed: number;
   wob = rand(0, TAU);
   bob = rand(0, TAU);
@@ -178,13 +183,15 @@ export class Enemy implements IEnemy {
 
   /** Státuszok léptetése; igaz, ha a DoT megölte az ellenfelet (a hívó ekkor kilép). */
   private tickStatus(dt: number, world: World): boolean {
+    // SZINERGIA „rothadás" (burn+poison együtt): gyorsabb ütem + erősebb tick + barnás füst
+    const rot = this.burnT > 0 && this.poisonT > 0;
     if (this.burnT > 0) {
       this.burnT -= dt; this.burnTick -= dt;
-      if (this.burnTick <= 0) { this.burnTick = 0.4; this.hp -= 100; world.particles.spawn(this.x, this.y, '#ff7a1e', 3, 90, 0.3); }
+      if (this.burnTick <= 0) { this.burnTick = rot ? 0.25 : 0.4; this.hp -= rot ? 160 : 100; world.particles.spawn(this.x, this.y, rot ? '#9a5a2a' : '#ff7a1e', 3, 90, 0.3); }
     }
     if (this.poisonT > 0) {
       this.poisonT -= dt; this.poisonTick -= dt;
-      if (this.poisonTick <= 0) { this.poisonTick = 0.5; this.hp -= 100; world.particles.spawn(this.x, this.y, '#8fbf4a', 3, 80, 0.3); }
+      if (this.poisonTick <= 0) { this.poisonTick = rot ? 0.3 : 0.5; this.hp -= rot ? 160 : 100; world.particles.spawn(this.x, this.y, rot ? '#6a7a2a' : '#8fbf4a', 3, 80, 0.3); }
     }
     if (this.freezeT > 0) this.freezeT -= dt;
     if (this.hp <= 0) { world.killEnemy(this); return true; }
@@ -199,6 +206,24 @@ export class Enemy implements IEnemy {
     if (this.hasteT > 0) this.hasteT -= dt;
     if (this.hideT > 0) this.hideT -= dt;
     if (this.champion === 'regen' && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + 300 * dt);
+    // shielded: időszakos blokk-ciklus (a lövéseket elnyeli, mint a Blokkoló)
+    if (this.champion === 'shielded') {
+      if (this.blockT > 0) this.blockT -= dt;
+      else { this.champCd -= dt; if (this.champCd <= 0) { this.blockT = 1.3; this.champCd = rand(2.4, 3.8); } }
+    }
+    // frozen: fagyos aura — a közeli játékost lassítja, + dér-részecske
+    if (this.champion === 'frozen') {
+      const dd = Math.hypot(world.player.x - this.x, world.player.y - this.y);
+      if (dd < this.r + 100) {
+        world.player.applySlow(0.6, 0.25);
+        if (Math.random() < 0.25) world.particles.spawn(this.x, this.y, '#aef0ff', 2, 70, 0.5);
+      }
+    }
+    // summoner: ritkán, véges számban gyenge csatlóst idéz (a World szabja a plafont)
+    if (this.champion === 'summoner' && this.summonsLeft > 0) {
+      this.champCd -= dt;
+      if (this.champCd <= 0) { this.champCd = rand(3.5, 5.5); if (world.summonMinion(this)) this.summonsLeft--; }
+    }
     this.wob += dt * 3;
     this.bob += dt * 5;
     this.breathing = false;

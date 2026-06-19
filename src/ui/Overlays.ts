@@ -12,14 +12,24 @@ import {
 } from '../game/progression';
 import { formatTime, type LifetimeStats, type TimeRecords } from '../game/stats';
 import { drawMedal } from '../game/medal';
+import { drawEnemy } from '../game/entities/enemies/EnemyRenderer';
+import { ENEMY_STATS, type EnemyKind } from '../game/entities/enemies/enemyTypes';
+import { ENEMY_NAMES, loadBestiary, loadBossBestiary, loadPerksSeen, loadSkillsSeen } from '../game/bestiary';
+import { ITEMS, itemName, itemDesc, type Item } from '../game/content/items';
+import { SKILLS, skillName, skillDesc, type Skill } from '../game/content/skills';
+import { drawPerkIcon, drawSkillIcon } from '../game/content/itemArt';
+import { shade } from '../engine/math';
+import { BOSS_ORDER, BOSS_REGISTRY, type BossTarget } from '../game/entities/enemies/bossRegistry';
+import type { IEnemy } from '../game/entities/enemies/Enemy';
+import { HP } from '../game/config';
 import { BIND_META, keyLabel } from '../game/settings';
 import { getLang, setLang, onLangChange, t, type Lang } from '../i18n';
 import type { InputAction } from '../engine/Input';
 import { el, pageHeader, panel, table, toggleField, button, select, slider } from './kit';
 
 export type OverlayAction =
-  | 'start' | 'resume' | 'menu' | 'admin' | 'rank' | 'settings' | 'credits' | 'edit-name'
-  | 'toggle-audio' | 'reset-progress' | 'narrator' | 'toggle-fps' | 'toggle-fullscreen' | 'toggle-gamefeel' | 'toggle-hitstop'
+  | 'start' | 'resume' | 'menu' | 'admin' | 'rank' | 'bestiary' | 'settings' | 'credits' | 'edit-name'
+  | 'toggle-audio' | 'reset-progress' | 'narrator' | 'toggle-fps' | 'toggle-fullscreen' | 'toggle-gamefeel' | 'toggle-hitstop' | 'toggle-thicktears'
   | 'rscale-100' | 'rscale-75' | 'rscale-50'
   | 'shadow-off' | 'shadow-hard' | 'shadow-soft'
   | 'admin-map' | 'admin-odds' | 'admin-enemy' | 'admin-boss' | 'admin-item' | 'admin-skill' | 'admin-balance' | 'admin-settings'
@@ -84,6 +94,8 @@ export interface SettingsView {
   gameFeel: boolean;
   /** Hit-stop (ütős fagyasztás ölés/sérülés pillanatában) BE-e. */
   hitStop: boolean;
+  /** Vastagabb játékos-lövedék (láthatóság/hozzáférhetőség) BE-e. */
+  thickTears: boolean;
 }
 
 /** A BEÁLLÍTÁSOK hub almenüi. */
@@ -143,6 +155,13 @@ export class Overlays {
   /** Az aktív RANG-almenü + a hozzá tartozó adat (a fülek belül váltanak). */
   private rankTab: RankTab = 'profile';
   private rankViewData: RankView | null = null;
+  /** BESTIÁRIUM: katakomba-fal + a kijelölt lény animált renderének RAF-ja. */
+  private readonly bestiary = byId('bestiary');
+  private bestiaryRaf = 0;
+  /** A Kódex aktív füle (Lények / Bossok / Tárgyak / Képességek). */
+  private codexTab: 'creatures' | 'bosses' | 'perks' | 'skills' = 'creatures';
+  /** Boss-előnézet példányok cache-e (a draw-hoz; nem frissül, statikus póz). */
+  private readonly bossPreviews = new Map<BossTarget, IEnemy>();
   private readonly settings = byId('settings');
   private readonly settingsBody = byId('settingsBody');
   /** A BEÁLLÍTÁSOK fejléc-fülsora (admin-mintára a admin-bar-ban él). */
@@ -213,6 +232,8 @@ export class Overlays {
     this.itemoffer.classList.add('hidden');
     this.nameModal.classList.add('hidden');
     this.rank.classList.add('hidden');
+    this.bestiary.classList.add('hidden');
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
     this.settings.classList.add('hidden');
     this.credits.classList.add('hidden');
   }
@@ -292,8 +313,18 @@ export class Overlays {
   }
 
   /** RANG hub: profil / rekordok / statisztika / ranglista almenük (belül váltanak). */
+  /** Felszálló parázs-hangulat (mint a főmenün) egy teljes-képernyős lapra; egyszer szúrjuk be. */
+  private ensureAtmos(page: HTMLElement): void {
+    if (page.querySelector('.menu-atmos')) return;
+    const atmos = el('div', { class: 'menu-atmos' });
+    atmos.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < 12; i++) atmos.append(el('span', { class: 'ember' }));
+    page.prepend(atmos);
+  }
+
   showRank(view: RankView): void {
     this.hideAll();
+    this.ensureAtmos(this.rank);
     this.rankViewData = view;
     this.rankTab = 'profile';
     this.renderRank();
@@ -430,9 +461,306 @@ export class Overlays {
     ]);
   }
 
+  /**
+   * KÓDEX: fülezett gyűjtemény (Lények / Bossok / Tárgyak / Képességek). A
+   * feloldatlanok sötét sziluettek; a feloldás kulcsai külön rendszerekből jönnek
+   * (ellenfél/boss = megölés, perk = felvétel, skill = felszerelés). A lény/boss
+   * a `drawEnemy`-vel, a perk/skill a `drawPerkIcon`/`drawSkillIcon`-nal rajzol.
+   */
+  showBestiary(): void {
+    this.hideAll();
+    this.ensureAtmos(this.bestiary);
+    this.renderCodex();
+    this.bestiary.classList.remove('hidden');
+  }
+
+  /** Az aktív Kódex-fül teljes újraépítése (fül-sor + fal-rács + részletező). */
+  private renderCodex(): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    const body = byId('bestiaryBody');
+    const tab = this.codexTab;
+
+    // Fül-sor a FELSŐ admin-bar-ba (mint a Rang/Beállítások füleı), nem a törzsbe
+    const tabDefs: Array<{ id: 'creatures' | 'bosses' | 'perks' | 'skills'; label: string }> = [
+      { id: 'creatures', label: t('best.creatures') },
+      { id: 'bosses', label: t('best.bosses') },
+      { id: 'perks', label: t('codex.perks') },
+      { id: 'skills', label: t('codex.skills') },
+    ];
+    const tabBar = byId('codexTabs');
+    tabBar.replaceChildren(...tabDefs.map((d) => {
+      const b = el('button', { class: d.id === tab ? 'btn small active' : 'btn small', text: d.label });
+      b.addEventListener('click', () => { this.codexTab = d.id; this.renderCodex(); });
+      return b;
+    }));
+
+    // Részletező-tábla (a kijelölt bejegyzés): nagy animált canvas + név + leírás
+    const detailCanvas = document.createElement('canvas');
+    detailCanvas.className = 'best-detail-canvas';
+    detailCanvas.width = 200; detailCanvas.height = 180;
+    const detailName = el('div', { class: 'best-detail-name' });
+    const detailStats = el('div', { class: 'best-detail-stats' });
+    const detailHint = el('div', { class: 'best-detail-hint', text: t('best.pick') });
+    const detail = el('div', { class: 'best-detail' }, [detailCanvas, detailName, detailStats, detailHint]);
+
+    const wall = el('div', { class: 'best-wall' });
+    const clearActive = (): void => Array.from(wall.querySelectorAll('.active')).forEach((n) => n.classList.remove('active'));
+
+    let unlockedN = 0, totalN = 0;
+
+    if (tab === 'creatures') {
+      // a pókfióka nem önálló bejegyzés (a nagy pók szétrobbanása), kihagyjuk
+      const kinds = (Object.keys(ENEMY_NAMES) as EnemyKind[]).filter((k) => k !== 'spiderling');
+      const unlocked = loadBestiary();
+      unlockedN = kinds.filter((k) => unlocked.has(k)).length; totalN = kinds.length;
+      for (const kind of kinds) {
+        const open = unlocked.has(kind);
+        const niche = el('button', { class: open ? 'best-niche' : 'best-niche locked' });
+        const c = this.nicheCanvas();
+        this.drawBestiaryFigure(c, kind, open, 18, 0, 0);
+        niche.append(c, el('span', { class: 'best-niche-name', text: open ? ENEMY_NAMES[kind] : '???' }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectBestiary(kind, open, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      }
+    } else if (tab === 'bosses') {
+      const bossUnlocked = loadBossBestiary();
+      unlockedN = BOSS_ORDER.filter((b) => bossUnlocked.has(b)).length; totalN = BOSS_ORDER.length;
+      for (const target of BOSS_ORDER) {
+        const open = bossUnlocked.has(target);
+        const niche = el('button', { class: open ? 'best-niche best-boss' : 'best-niche best-boss locked' });
+        const c = this.nicheCanvas();
+        this.drawBossFigure(c, target, open);
+        niche.append(c, el('span', { class: 'best-niche-name', text: open ? BOSS_REGISTRY[target].name : '???' }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectBossBestiary(target, open, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      }
+    } else if (tab === 'perks') {
+      const seen = loadPerksSeen();
+      const perks = ITEMS.filter((it) => !it.skill); // a skillt adó tárgyak a Képességek fülön
+      unlockedN = perks.filter((it) => seen.has(it.name)).length; totalN = perks.length;
+      for (const item of perks) {
+        const open = seen.has(item.name);
+        const niche = el('button', { class: open ? 'best-niche' : 'best-niche locked' });
+        const c = this.nicheCanvas();
+        this.drawPerkFigure(c, item, open, 22, 0);
+        niche.append(c, el('span', { class: 'best-niche-name', text: open ? itemName(item) : '???' }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectPerk(item, open, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      }
+    } else {
+      const seen = loadSkillsSeen();
+      unlockedN = SKILLS.filter((s) => seen.has(s.id)).length; totalN = SKILLS.length;
+      for (const skill of SKILLS) {
+        const open = seen.has(skill.id);
+        const niche = el('button', { class: open ? 'best-niche' : 'best-niche locked' });
+        const c = this.nicheCanvas();
+        this.drawSkillFigure(c, skill, open, 22, 0);
+        niche.append(c, el('span', { class: 'best-niche-name', text: open ? skillName(skill) : '???' }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectSkill(skill, open, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      }
+    }
+
+    byId('bestiaryCount').textContent = t('best.count', { n: unlockedN, total: totalN });
+    body.replaceChildren(el('div', { class: 'best-layout' }, [wall, detail]));
+  }
+
+  /** Egy egységes fülke-canvas (76×76) a rácshoz. */
+  private nicheCanvas(): HTMLCanvasElement {
+    const c = document.createElement('canvas');
+    c.className = 'best-niche-canvas';
+    c.width = 76; c.height = 76;
+    return c;
+  }
+
+  /**
+   * Felfedezetlen bejegyzés: SEMLEGES, kitakart „?" (sem a forma, sem animáció
+   * nem árul el semmit) - minden fülön (lény/boss/tárgy/skill) ugyanaz.
+   */
+  private drawLocked(c: HTMLCanvasElement): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    const s = Math.min(c.width, c.height);
+    ctx.save();
+    ctx.font = `bold ${Math.round(s * 0.52)}px Georgia, "Cinzel", serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(176, 138, 90, 0.32)';
+    ctx.fillText('?', c.width / 2, c.height / 2 + s * 0.04);
+    ctx.restore();
+  }
+
+  /** Egy boss-példány (cache-elt) lekérése az előnézethez. */
+  private bossPreview(target: BossTarget): IEnemy {
+    let b = this.bossPreviews.get(target);
+    if (!b) { b = BOSS_REGISTRY[target].make(0, 0, 1, '#9c4bd8'); this.bossPreviews.set(target, b); }
+    return b;
+  }
+
+  /** Egy boss a megadott canvasra (feloldva színes + skálázva, zárva sötét sziluett). */
+  private drawBossFigure(c: HTMLCanvasElement, target: BossTarget, open: boolean): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    if (!open) { this.drawLocked(c); return; }
+    ctx.clearRect(0, 0, c.width, c.height);
+    const b = this.bossPreview(target);
+    b.x = c.width / 2; b.y = c.height / 2 + 2;
+    const k = Math.min(0.5, 22 / b.r); // a nagy bossok kisebb skálán férnek a fülkébe
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.scale(k, k);
+    ctx.translate(-b.x, -b.y);
+    b.draw(ctx);
+    ctx.restore();
+  }
+
+  /** A kijelölt boss részletezése (nagy statikus render + név + statok). */
+  private selectBossBestiary(target: BossTarget, open: boolean, canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    if (!open) {
+      nameEl.textContent = t('best.locked');
+      statsEl.replaceChildren();
+      hintEl.textContent = t('best.lockedHint');
+      this.drawLocked(canvas);
+      return;
+    }
+    const ctx = canvas.getContext('2d');
+    const b = this.bossPreview(target);
+    nameEl.textContent = BOSS_REGISTRY[target].name;
+    statsEl.replaceChildren(
+      el('span', { class: 'best-stat', text: `${t('best.hp')} ${Math.round(b.maxHp)}` }),
+    );
+    hintEl.textContent = '';
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      b.x = canvas.width / 2; b.y = canvas.height / 2 + 4;
+      const k = Math.min(0.7, 40 / b.r);
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.scale(k, k);
+      ctx.translate(-b.x, -b.y);
+      b.draw(ctx);
+      ctx.restore();
+    }
+  }
+
+  /** Egy ellenfél a megadott canvasra (feloldva színes, zárva sötét sziluett). */
+  private drawBestiaryFigure(c: HTMLCanvasElement, kind: EnemyKind, open: boolean, r: number, bob: number, wob: number): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    if (!open) { this.drawLocked(c); return; }
+    const s = ENEMY_STATS[kind];
+    ctx.clearRect(0, 0, c.width, c.height);
+    drawEnemy(ctx, {
+      kind, x: c.width / 2, y: c.height / 2 + 4, r,
+      col: s.col, col2: s.col2,
+      flash: false, bob, wob, face: 0, moving: false,
+    });
+  }
+
+  /** A kijelölt fülke részletezése + a nagy render folyamatos animálása (idle-mozgás). */
+  private selectBestiary(kind: EnemyKind, open: boolean, canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    if (!open) {
+      nameEl.textContent = t('best.locked');
+      statsEl.replaceChildren();
+      hintEl.textContent = t('best.lockedHint');
+      this.drawLocked(canvas);
+      return;
+    }
+    const s = ENEMY_STATS[kind];
+    nameEl.textContent = ENEMY_NAMES[kind];
+    statsEl.replaceChildren(
+      el('span', { class: 'best-stat', text: `${t('best.hp')} ${Math.round(s.hp)}` }),
+      el('span', { class: 'best-stat', text: `${t('best.dmg')} ${Math.round(s.dmg * HP.half)}` }),
+    );
+    hintEl.textContent = '';
+    const start = performance.now();
+    const tick = (now: number): void => {
+      const ts = (now - start) / 1000;
+      this.drawBestiaryFigure(canvas, kind, true, 40, Math.sin(ts * 5) * 1.2, ts * 3);
+      this.bestiaryRaf = requestAnimationFrame(tick);
+    };
+    this.bestiaryRaf = requestAnimationFrame(tick);
+  }
+
+  /** Egy perk animált ikonja a megadott canvasra (zárva sötét sziluett). */
+  private drawPerkFigure(c: HTMLCanvasElement, item: Item, open: boolean, r: number, t: number): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    if (!open) { this.drawLocked(c); return; }
+    ctx.clearRect(0, 0, c.width, c.height);
+    drawPerkIcon(ctx, item.name, c.width / 2, c.height / 2 + 2, r, t, item.col, item.col2 ?? shade(item.col, -0.38));
+  }
+
+  /** A kijelölt perk részletezése (név + hatás-leírás) + folyamatos animáció. */
+  private selectPerk(item: Item, open: boolean, canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    if (!open) {
+      nameEl.textContent = t('best.locked');
+      statsEl.replaceChildren();
+      hintEl.textContent = t('codex.perkHint');
+      this.drawLocked(canvas);
+      return;
+    }
+    nameEl.textContent = itemName(item);
+    statsEl.replaceChildren(el('span', { class: 'best-stat', text: itemDesc(item) }));
+    hintEl.textContent = '';
+    const start = performance.now();
+    const tick = (now: number): void => {
+      this.drawPerkFigure(canvas, item, true, 46, (now - start) / 1000);
+      this.bestiaryRaf = requestAnimationFrame(tick);
+    };
+    this.bestiaryRaf = requestAnimationFrame(tick);
+  }
+
+  /** Egy skill animált ikonja a megadott canvasra (zárva sötét sziluett). */
+  private drawSkillFigure(c: HTMLCanvasElement, skill: Skill, open: boolean, r: number, t: number): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    if (!open) { this.drawLocked(c); return; }
+    ctx.clearRect(0, 0, c.width, c.height);
+    drawSkillIcon(ctx, skill.id, c.width / 2, c.height / 2 + 2, r, t, skill.col, shade(skill.col, -0.4));
+  }
+
+  /** A kijelölt skill részletezése (név + leírás) + folyamatos animáció. */
+  private selectSkill(skill: Skill, open: boolean, canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    if (!open) {
+      nameEl.textContent = t('best.locked');
+      statsEl.replaceChildren();
+      hintEl.textContent = t('codex.skillHint');
+      this.drawLocked(canvas);
+      return;
+    }
+    nameEl.textContent = skillName(skill);
+    statsEl.replaceChildren(el('span', { class: 'best-stat', text: skillDesc(skill) }));
+    hintEl.textContent = '';
+    const start = performance.now();
+    const tick = (now: number): void => {
+      this.drawSkillFigure(canvas, skill, true, 46, (now - start) / 1000);
+      this.bestiaryRaf = requestAnimationFrame(tick);
+    };
+    this.bestiaryRaf = requestAnimationFrame(tick);
+  }
+
   /** BEÁLLÍTÁSOK hub: grafika / hang / irányítás / általános almenük (belül váltanak). */
   showSettings(view: SettingsView): void {
     this.hideAll();
+    this.ensureAtmos(this.settings);
     // Nyelvváltáskor (a lap nyitva léte mellett) újrarajzoljuk, hogy a választó és
     // a fordított címkék azonnal frissüljenek. Egyszer iratkozunk fel.
     if (!this.langSubscribed) {
@@ -512,9 +840,10 @@ export class Overlays {
       scaleRow,
       toggleField({ label: t('set.fullscreen'), value: view.fullscreen, onChange: () => this.onAction('toggle-fullscreen'), onLabel: t('common.on'), offLabel: t('common.off') }),
       slider({ label: t('set.shake'), value: view.shake, format: pct, onChange: (v) => this.onShake(v) }),
-      toggleField({ label: t('set.fps'), value: view.fpsShown, onChange: () => this.onAction('toggle-fps'), onLabel: t('common.on'), offLabel: t('common.off') }),
-      toggleField({ label: t('set.gamefeel'), value: view.gameFeel, onChange: () => this.onAction('toggle-gamefeel'), onLabel: t('common.on'), offLabel: t('common.off') }),
-      toggleField({ label: t('set.hitstop'), value: view.hitStop, onChange: () => this.onAction('toggle-hitstop'), onLabel: t('common.on'), offLabel: t('common.off') }),
+      toggleField({ label: t('set.fps'), value: view.fpsShown, onChange: () => this.onAction('toggle-fps'), onLabel: t('common.on'), offLabel: t('common.off'), hint: t('set.fps.help') }),
+      toggleField({ label: t('set.gamefeel'), value: view.gameFeel, onChange: () => this.onAction('toggle-gamefeel'), onLabel: t('common.on'), offLabel: t('common.off'), hint: t('set.gamefeel.help') }),
+      toggleField({ label: t('set.hitstop'), value: view.hitStop, onChange: () => this.onAction('toggle-hitstop'), onLabel: t('common.on'), offLabel: t('common.off'), hint: t('set.hitstop.help') }),
+      toggleField({ label: t('set.thicktears'), value: view.thickTears, onChange: () => this.onAction('toggle-thicktears'), onLabel: t('common.on'), offLabel: t('common.off'), hint: t('set.thicktearsHint') }),
     ]);
   }
 

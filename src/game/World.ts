@@ -10,6 +10,7 @@ import { drawFloorTiles, drawDecorations, drawLuckFloor } from './level/floorRen
 
 import { Player } from './entities/Player';
 import { Tear } from './entities/Tear';
+import type { Ring } from './entities/Ring';
 import { Enemy } from './entities/enemies/Enemy';
 import { drawEnemy } from './entities/enemies/EnemyRenderer';
 import { drawBullet } from './entities/BulletRenderer';
@@ -31,7 +32,7 @@ import { LightingSystem } from './systems/LightingSystem';
 import { computeVisibility, type Seg } from './systems/visibility';
 import { buildOccluder, type OccluderShape } from './systems/occluder';
 import { loadShadowMode, saveShadowMode, saveShake, loadHitStop, type ShadowMode } from './settings';
-import { ROOM, GRID, PLAYER_BASE, HP, LAB_TIMER } from './config';
+import { ROOM, GRID, PLAYER_BASE, HP, LAB_TIMER, BEAM, FLAME, CHARGE } from './config';
 import { TAU, rand, clamp, dist2, pick } from '../engine/math';
 import { parseTemplate, type BossKind } from './level/roomTemplates';
 import {
@@ -44,8 +45,9 @@ import { drawWalls, drawDoors, drawTrapdoor, drawWaterBody } from './level/roomR
 import { FloorCache } from './level/floorCache';
 import { drawProjectileGlow, drawDamageLabels } from './level/worldOverlays';
 import { MAP_ANIM_BY_CH } from './level/mapAnim';
-import { resolveLevel, CHAPTERS, chapterFloorRange, chapterName, chapterBossName } from './level/levels';
+import { resolveLevel, CHAPTERS, chapterFloorRange, chapterName, chapterBossName, chapterBossQuote } from './level/levels';
 import { enemyScale, scaleIncomingDamage, enemyDamageMul, NO_SCALE, type EnemyScale } from './balance/difficulty';
+import { unlockEnemy, unlockBoss, unlockPerk, unlockSkill } from './bestiary';
 import { TUNING } from './balance/tuning';
 import { SKILL_BY_ID, skillName, skillDesc } from './content/skills';
 import { Bomb, type BombType } from './entities/Bomb';
@@ -136,6 +138,8 @@ export class World {
   private readonly entities = new EntityManager();
   /** A játékos könnyei — az EntityManager listája (a hívási helyek változatlanok). */
   get tears(): Tear[] { return this.entities.tears; }
+  /** Pecsétgyűrűk (#2) — az EntityManager listája. */
+  get rings(): Ring[] { return this.entities.rings; }
   /** Ellenfél-lövedékek — az EntityManager listája. */
   get ebullets(): EnemyBullet[] { return this.entities.ebullets; }
   /** Talaj-veszélyek rendszere (méreg/tűz/köd/akna) — a World addHazard-ja ide delegál. */
@@ -240,7 +244,7 @@ export class World {
   private readonly labBox: Rect = { x: 0, y: 0, w: 0, h: 0 };
   private labWon = false;
   /** Boss-intro (gótikus névtábla): a megjelenítendő név + hátralévő idő (mp). */
-  private bossIntro: { name: string; t: number } | null = null;
+  private bossIntro: { name: string; quote: string; t: number } | null = null;
   /** Hit-stop („sleep"): hátralévő fagyasztás (mp); >0 alatt a játékmenet áll. */
   private hitStop = 0;
   /** Hit-stop kapcsoló (Beállítások · Grafika); kikapcsolva sosem fagy. */
@@ -277,6 +281,17 @@ export class World {
   private floors = new FloorCache();
   /** Újrahasznosított ellenfél-iterációs puffer (a frame-enkénti spread helyett). */
   private readonly enemyScratch: IEnemy[] = [];
+  /**
+   * Kénkő-sugár (#1) aktuális geometriája rajzhoz/HUD-hoz. `on` csak abban a
+   * frame-ben igaz, amikor a játékos épp tüzeli; ekkor a (x0,y0)→(x1,y1) szakasz
+   * a sugár, `t` a pulzáló animáció-fázis. A `World.updateBeam` tölti.
+   */
+  private beam = { on: false, x0: 0, y0: 0, x1: 0, y1: 0, t: 0 };
+  /**
+   * Lángkúp (#4) aktuális geometriája rajzhoz. `on` csak a tüzelő frame-ben igaz;
+   * (x,y) a torkolat, `ang` a kúp tengelye, `t` az animáció-fázis. A `updateCone` tölti.
+   */
+  private cone = { on: false, x: 0, y: 0, ang: 0, t: 0 };
   /**
    * Víz-elrendezés gyorsítótár: a víz-cellák halmaza/téglalapjai/burkoló doboza
    * a szobán belül állandó, csak a hullám-animáció él. Így a frame-enkénti
@@ -325,10 +340,12 @@ export class World {
   setGameFeel(v: boolean): void { this.fx.setGameFeel(v); }
   /** Kamera-kick (a Player.shoot hívja); a facade-on át, mert az `fx` privát. */
   addKick(dirX: number, dirY: number, amount: number): void { this.fx.addKick(dirX, dirY, amount); }
+  /** Kamera-LERP célzás-cél (a Player.shoot hívja); a nézet lágyan a lövésirányba csúszik. */
+  setCamLook(dirX: number, dirY: number): void { this.fx.setCamLook(dirX, dirY); }
   /** Hit-stop be/ki (Beállítások); kikapcsoláskor a futó fagyasztás is feloldódik. */
   setHitStop(v: boolean): void { this.hitStopEnabled = v; if (!v) this.hitStop = 0; }
   /** A futó boss-intro állapota a HUD-nak (`null`, ha nincs), vagy `{name, t}`. */
-  get bossIntroView(): { name: string; t: number } | null { return this.bossIntro; }
+  get bossIntroView(): { name: string; quote: string; t: number } | null { return this.bossIntro; }
   /**
    * Hit-stop kiváltása: rövid, pár frame-es fagyasztás egy ütős pillanatban (ölés,
    * sérülés). Halmozás helyett a leghosszabbat tartja, és felülről korlátozott,
@@ -350,15 +367,17 @@ export class World {
   }
 
   /** Talaj-veszély lerakása (lásd HazardSystem) — ellenfelek/bossok hívják. */
-  addHazard(kind: HazardKind, x: number, y: number, r: number, life: number, arm = 0): void {
-    this.hazards.add(kind, x, y, r, life, arm);
+  addHazard(kind: HazardKind, x: number, y: number, r: number, life: number, arm = 0, owner: 'player' | 'enemy' = 'enemy'): void {
+    this.hazards.add(kind, x, y, r, life, arm, owner);
   }
 
   /** Boss-példány a sablon által megadott registry-célból (mind a 10 boss). */
   private makeBoss(x: number, y: number, kind: BossKind): IEnemy {
     const floor = Math.max(1, Math.floor(this.floor));
     const color = this._theme.bossColor;
-    return BOSS_REGISTRY[kind].make(x, y, floor, color);
+    const b = BOSS_REGISTRY[kind].make(x, y, floor, color);
+    b.bossId = kind; // bestiárium: melyik boss (az első megöléskor feloldjuk)
+    return b;
   }
   hasNeighbor(dir: Dir): boolean { return this.hub ? false : this.dungeon.hasNeighbor(dir); }
   isCurrentRoomCleared(): boolean { return this.currentRoom.cleared; }
@@ -390,6 +409,7 @@ export class World {
     this.particles.clear();
     this.trapdoor = null;
     this.enemySlowT = 0;
+    if (this.player.activeSkillId) unlockSkill(this.player.activeSkillId); // induló skill a Kódexbe
     // kezdő skill induljon feltöltve, hogy azonnal kipróbálható legyen
     const startSkill = this.player.activeSkillId ? SKILL_BY_ID[this.player.activeSkillId] : undefined;
     if (startSkill) this.player.skillCharge = startSkill.chargeMax;
@@ -642,7 +662,7 @@ export class World {
       room.enemies.push(this.makeBoss(c.x, c.y, at.kind));
       this.audio.boss();
       this.addShake(10);
-      this.bossIntro = { name: chapterBossName(chapter), t: 2.4 }; // az előnézet is mutassa az introt
+      this.bossIntro = { name: chapterBossName(chapter), quote: chapterBossQuote(chapter), t: 2.4 }; // az előnézet is mutassa az introt
     } else {
       const scale = enemyScale(this.floor, this.player);
       for (const sp of parsed.spawns) {
@@ -724,7 +744,7 @@ export class World {
       room.enemies.push(this.makeBoss(c.x, c.y, at.kind));
       this.audio.boss();
       this.addShake(12);
-      this.bossIntro = { name: chapterBossName(chapter), t: 2.4 }; // gótikus névtábla (#60/Ú4)
+      this.bossIntro = { name: chapterBossName(chapter), quote: chapterBossQuote(chapter), t: 2.4 }; // gótikus névtábla (#60/Ú4)
       return;
     }
 
@@ -876,6 +896,8 @@ export class World {
 
     this.runStats.kills++;
     if (enemy.boss) this.runStats.bossKills++;
+    if (enemy instanceof Enemy) unlockEnemy(enemy.kind); // bestiárium: feloldás első megöléskor
+    else if (enemy.boss && enemy.bossId) unlockBoss(enemy.bossId); // boss-bestiárium
 
     this.audio.splat();
     this.particles.spawn(enemy.x, enemy.y, enemy.col, enemy.boss ? 40 : 12, enemy.boss ? 320 : 180, enemy.boss ? 0.9 : 0.45);
@@ -930,6 +952,21 @@ export class World {
     }
 
     // A drop nem ölésenként jön, hanem szobánként egyszer (lásd a szoba-kipucolás ágat).
+  }
+
+  /**
+   * Summoner-champion: gyenge csótány-csatlóst idéz a közelébe. A szoba-zsúfoltság
+   * a plafon (28 fölött nem idéz), így nem pörög túl a tömb/bake. Igaz, ha idézett.
+   */
+  summonMinion(summoner: Enemy): boolean {
+    const room = this.currentRoom;
+    if (room.enemies.length >= 28) return false;
+    const scale = enemyScale(this.floor, this.player);
+    const ang = rand(0, TAU), rad = rand(14, 34);
+    room.enemies.push(new Enemy('roach', summoner.x + Math.cos(ang) * rad, summoner.y + Math.sin(ang) * rad, scale));
+    this.particles.spawn(summoner.x, summoner.y, '#c89af0', 12, 180, 0.5);
+    this.audio.splat();
+    return true;
   }
 
   /** A nagy pók szétrobbanása: 10 pók-fióka, közülük pontosan kettő harapós (sebző). */
@@ -1019,9 +1056,16 @@ export class World {
     if (s) s.declined = true;
   }
 
+  /** Kódex-feloldás felvételkor: skillt adó tárgy → skill, egyébként perk. */
+  private registerCollected(item: Item): void {
+    if (item.skill) unlockSkill(item.skill);
+    else unlockPerk(item.name);
+  }
+
   /** Egy megnyert/elfogadott tárgy felvétele a játékosra (hang + effekt). */
   private giveItem(item: Item): void {
     item.apply(this.player);
+    this.registerCollected(item);
     this.player.collected.push(item);
     this.player.refreshLook();
     this.audio.item();
@@ -1033,6 +1077,7 @@ export class World {
   private collectPedestal(pd: Pedestal): void {
     pd.taken = true;
     pd.item.apply(this.player);
+    this.registerCollected(pd.item);
     this.player.collected.push(pd.item);
     this.player.refreshLook();
     this.audio.item();
@@ -1049,6 +1094,7 @@ export class World {
     if (s.offer.kind === 'item') {
       const item = s.offer.item;
       item.apply(this.player);
+      this.registerCollected(item);
       this.player.collected.push(item);
       this.player.refreshLook();
       this.addFloater(this.player.x, this.player.y - 30, tr('fx.pickup', { name: itemName(item), desc: itemDesc(item) }), item.col);
@@ -1135,6 +1181,7 @@ export class World {
         this.offerGambleSkill(item);
       } else {
         item.apply(p);
+        this.registerCollected(item);
         p.collected.push(item);
         p.refreshLook();
       }
@@ -1282,6 +1329,354 @@ export class World {
   }
 
   /** Kísérők frissítése: a keringő orbok folyamatosan sebzik az érintett ellenfelet. */
+  /**
+   * Kénkő-sugár (#1): folyamatos, raycast-alapú sugár-lőmód. A `Player.beaming`
+   * jelzi, hogy ebben a frame-ben tüzel; ekkor a sugár a torkolattól a lövésirányba
+   * megy az ELSŐ kőig/falig, és `BEAM.tick` időnként sebzi a vonalon álló MINDEN
+   * ellenfelet (átütő jelleg). Saját csavar: a játékos elemi flagjei (burn/poison/
+   * freeze) a teljes vonalon terjednek - a sugár így a status-buildek motorja.
+   */
+  private updateBeam(dt: number): void {
+    const p = this.player;
+    if (!p.beamMode || !p.beaming || !p.alive) {
+      this.beam.on = false;
+      p.beamTickAcc = 0;
+      return;
+    }
+    const dir = p.beamDir;
+    const ang = Math.atan2(dir.y, dir.x);
+    const ox = p.x + dir.x * 18; // a torkolatnál indul (kicsivel a test szélén kívül)
+    const oy = p.y + dir.y * 18;
+
+    // hossz: a szoba faláig ÉS az első kőig, a BEAM.range plafonnal vágva
+    const rc = this._room;
+    const m = 4; // fal-margó
+    let wall = BEAM.range;
+    if (dir.x > 0) wall = Math.min(wall, (rc.x + rc.w - m - ox) / dir.x);
+    else if (dir.x < 0) wall = Math.min(wall, (rc.x + m - ox) / dir.x);
+    if (dir.y > 0) wall = Math.min(wall, (rc.y + rc.h - m - oy) / dir.y);
+    else if (dir.y < 0) wall = Math.min(wall, (rc.y + m - oy) / dir.y);
+    wall = Math.max(0, wall);
+    const len = Math.min(wall, this.rayObstacleDistance(ox, oy, ang, wall));
+    const ex = ox + dir.x * len;
+    const ey = oy + dir.y * len;
+    this.beam.on = true;
+    this.beam.x0 = ox; this.beam.y0 = oy; this.beam.x1 = ex; this.beam.y1 = ey;
+    this.beam.t += dt;
+
+    // játékérzet: a nézet a sugár irányába simul + enyhe, FOLYAMATOS visszarúgás
+    // (a sima lövés impulzusos 26-ja ≈ 36/mp; itt dt-vel arányosan adagoljuk)
+    if (this.gameFeel) {
+      this.setCamLook(dir.x, dir.y);
+      p.vx -= dir.x * 36 * dt;
+      p.vy -= dir.y * 36 * dt;
+    }
+
+    // sebzés-tick: a könny-DPS-hez igazítva (dmg/fireRate), hogy EGY célon ne
+    // legyen erősebb a sima lövésnél; a vonalon mindenkit talál (tömeg-előny).
+    p.beamTickAcc += dt;
+    if (p.beamTickAcc < BEAM.tick) return;
+    p.beamTickAcc -= BEAM.tick;
+    const dps = (p.dmg / Math.max(0.01, p.fireRate)) * BEAM.dpsMul;
+    this.beamDamage(ox, oy, ex, ey, dps * BEAM.tick);
+    this.audio.hitEnemy();
+  }
+
+  /** A sugár vonalán álló MINDEN ellenfél sebzése (pont-szakasz távolság). */
+  private beamDamage(x0: number, y0: number, x1: number, y1: number, dmg: number): void {
+    const p = this.player;
+    const dx = x1 - x0, dy = y1 - y0;
+    const len2 = dx * dx + dy * dy || 1;
+    for (const e of [...this.currentRoom.enemies]) {
+      if (e instanceof Enemy && !e.targetable) continue; // föld alatt / eltűnt
+      // a sugár-szakaszra vetített legközelebbi pont (t∈[0,1])
+      const tt = clamp(((e.x - x0) * dx + (e.y - y0) * dy) / len2, 0, 1);
+      const cx = x0 + dx * tt, cy = y0 + dy * tt;
+      const rr = BEAM.width + e.r;
+      if (dist2(e.x, e.y, cx, cy) >= rr * rr) continue;
+      if (e instanceof Enemy && e.blocking) { // blokkol: ezen a célon elnyeli
+        this.particles.spawn(cx, cy, '#cfe0ff', 3, 90, 0.2);
+        continue;
+      }
+      e.hp -= dmg;
+      if (!e.boss) e.flash = 0.06;
+      this.addDamage(e.x, e.y - e.r, dmg, { color: BEAM.core });
+      this.particles.spawn(e.x, e.y, e.col, 3, 110, 0.2);
+      // saját csavar: az elemi flagek a TELJES vonalon terjednek
+      if (e instanceof Enemy) {
+        if (p.burn) e.applyBurn(2.5);
+        if (p.poison) e.applyPoison(4);
+        if (p.freeze) e.applyFreeze(1.5);
+      }
+      if (e.hp <= 0) this.killEnemy(e);
+    }
+  }
+
+  /**
+   * Kénkő-sugár kirajzolása - procedurális „pokoltűz" nyaláb, NEM lapos vonal.
+   * Saját, forgatott koordináta-keretben (origó a torkolatnál, +x a sugár mentén)
+   * dolgozunk, így a perpendikuláris (y) gradiens adja a forró-mag → lágy izzó perem
+   * átmenetet, a test pedig HULLÁMZÓ szélű (élő plazma). Rétegek additívan:
+   * hő-köd → izzó test (wavy) → forró mag → végigfutó energia-csomók. (A torkolat-
+   * villanás és a becsapódás-robbanás KIVÉVE - kérésre kevesebb animáció.)
+   */
+  private drawBeam(ctx: CanvasRenderingContext2D): void {
+    if (!this.beam.on) return;
+    const { x0, y0, x1, y1, t } = this.beam;
+    const dx = x1 - x0, dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    if (len < 2) return;
+    const ang = Math.atan2(dy, dx);
+    const W = BEAM.width;
+    // szabálytalan villódzás (több, nem összemérhető frekvencia → nem gépies pulzálás)
+    const flick = 0.86 + 0.14 * Math.sin(t * 47) + 0.06 * Math.sin(t * 113 + 1.7);
+    const flow = t * 6.2; // az energia-áramlás fázisa a sugár mentén
+
+    ctx.save();
+    ctx.translate(x0, y0);
+    ctx.rotate(ang);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineJoin = 'round';
+
+    // 1) Külső hő-köd: széles, lágy szélű, perpendikuláris gradiens (a sugár „aurája")
+    const hazeW = W * 3.4;
+    const haze = ctx.createLinearGradient(0, -hazeW, 0, hazeW);
+    haze.addColorStop(0.0, 'rgba(190,30,12,0)');
+    haze.addColorStop(0.5, `rgba(230,70,28,${0.16 * flick})`);
+    haze.addColorStop(1.0, 'rgba(190,30,12,0)');
+    ctx.fillStyle = haze;
+    ctx.fillRect(-W, -hazeW, len + W * 2, hazeW * 2);
+
+    // 2) Izzó TEST hullámzó peremmel: a fél-szélesség hely+idő-függő zavarral mozog,
+    //    a torkolatnál enyhén kiszélesedik (flare). A kitöltés perpendikuláris gradiens:
+    //    áttetsző perem → molten narancs → majdnem fehér a tengelynél.
+    const segs = Math.max(10, Math.floor(len / 22));
+    const bodyW = W * 1.15;
+    const halfAt = (i: number): number => {
+      const f = i / segs;
+      const flare = 1 + Math.exp(-f * 7) * 0.6;            // torkolat-kiszélesedés
+      const wob = 1 + 0.16 * Math.sin(f * len * 0.05 - flow * 2) + 0.10 * Math.sin(f * len * 0.11 + flow);
+      return bodyW * flare * wob * flick;
+    };
+    ctx.beginPath();
+    ctx.moveTo(0, -halfAt(0));
+    for (let i = 1; i <= segs; i++) ctx.lineTo((len * i) / segs, -halfAt(i)); // felső perem
+    for (let i = segs; i >= 0; i--) ctx.lineTo((len * i) / segs, halfAt(i));   // alsó perem
+    ctx.closePath();
+    const body = ctx.createLinearGradient(0, -bodyW * 1.6, 0, bodyW * 1.6);
+    body.addColorStop(0.0, 'rgba(150,18,8,0)');
+    body.addColorStop(0.28, `rgba(214,42,16,${0.85 * flick})`);
+    body.addColorStop(0.5, `rgba(255,150,70,${0.96 * flick})`);
+    body.addColorStop(0.72, `rgba(214,42,16,${0.85 * flick})`);
+    body.addColorStop(1.0, 'rgba(150,18,8,0)');
+    ctx.fillStyle = body;
+    ctx.fill();
+
+    // 3) Forró MAG: vékony, fehér-arany, áttetsző szélű szál a tengelyen
+    const coreW = Math.max(2.2, W * 0.42) * flick;
+    const core = ctx.createLinearGradient(0, -coreW, 0, coreW);
+    core.addColorStop(0.0, 'rgba(255,210,150,0)');
+    core.addColorStop(0.5, `rgba(255,247,224,${0.95 * flick})`);
+    core.addColorStop(1.0, 'rgba(255,210,150,0)');
+    ctx.fillStyle = core;
+    ctx.fillRect(0, -coreW, len, coreW * 2);
+
+    // 4) Végigfutó energia-csomók: pár fényes, megnyúlt folt a mag mentén (mozgás-érzet)
+    const pellets = Math.max(2, Math.floor(len / 130));
+    for (let i = 0; i < pellets; i++) {
+      const px = ((flow * 60 + i * (len / pellets)) % (len + 60)) - 30;
+      if (px < 0 || px > len) continue;
+      const pr = coreW * 1.7;
+      const g = ctx.createRadialGradient(px, 0, 0, px, 0, pr * 3);
+      g.addColorStop(0, `rgba(255,244,210,${0.8 * flick})`);
+      g.addColorStop(0.5, `rgba(255,130,60,${0.4 * flick})`);
+      g.addColorStop(1, 'rgba(255,90,40,0)');
+      ctx.fillStyle = g;
+      ctx.save();
+      ctx.translate(px, 0); ctx.scale(2.4, 1); // a haladás irányába megnyújtva
+      ctx.beginPath(); ctx.arc(0, 0, pr * 1.6, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * Lángkúp (#4): folyamatos, közeli kúp-AoE (lángszóró). A `Player.coning` jelzi a
+   * tüzelő frame-et; ekkor a torkolatból a célirányba egy `FLAME.halfAngle` fél-szögű,
+   * `FLAME.range` hosszú kúp ég. Tick-sebzés a kúpban álló MINDEN ellenfélre + beépített
+   * burn, és a játékos egyéb elemi flagjei (poison/freeze) is terjednek. Saját csavar:
+   * a kúp végén player-tulajdonú égő talaj-nyom marad (plafonnal: `FLAME.floorMax`).
+   */
+  private updateCone(dt: number): void {
+    const p = this.player;
+    if (!p.flameMode || !p.coning || !p.alive || p.beamMode) { // a sugár elsőbbséget élvez
+      this.cone.on = false;
+      p.coneTickAcc = 0; p.coneFloorAcc = 0;
+      return;
+    }
+    const ang = Math.atan2(p.coneDir.y, p.coneDir.x);
+    const ox = p.x + p.coneDir.x * 14, oy = p.y + p.coneDir.y * 14; // torkolat
+    this.cone.on = true;
+    this.cone.x = ox; this.cone.y = oy; this.cone.ang = ang; this.cone.t += dt;
+
+    // játékérzet: a nézet a kúp irányába simul + enyhe, folyamatos visszarúgás
+    if (this.gameFeel) {
+      this.setCamLook(p.coneDir.x, p.coneDir.y);
+      p.vx -= p.coneDir.x * 28 * dt;
+      p.vy -= p.coneDir.y * 28 * dt;
+    }
+
+    // sebzés-tick (a könny-DPS-hez igazítva; a burn DoT a tetejére jön)
+    p.coneTickAcc += dt;
+    if (p.coneTickAcc >= FLAME.tick) {
+      p.coneTickAcc -= FLAME.tick;
+      const dps = (p.dmg / Math.max(0.01, p.fireRate)) * FLAME.dpsMul;
+      this.coneDamage(ox, oy, ang, dps * FLAME.tick);
+      this.audio.hitEnemy();
+    }
+
+    // égő talaj-nyom a kúp végén, ritka ütemmel és plafonnal (perf + balansz)
+    p.coneFloorAcc += dt;
+    if (p.coneFloorAcc >= FLAME.floorEvery) {
+      p.coneFloorAcc -= FLAME.floorEvery;
+      if (this.hazards.playerFireCount() < FLAME.floorMax) {
+        const reach = FLAME.range * (0.6 + Math.random() * 0.35);
+        const spread = (Math.random() - 0.5) * FLAME.halfAngle * 1.2;
+        const fx = ox + Math.cos(ang + spread) * reach;
+        const fy = oy + Math.sin(ang + spread) * reach;
+        this.addHazard('fire', fx, fy, FLAME.floorR, FLAME.floorLife, 0, 'player');
+      }
+    }
+  }
+
+  /** A kúpban álló MINDEN ellenfél sebzése (pont-a-kúpban teszt) + elemi flagek. */
+  private coneDamage(ox: number, oy: number, ang: number, dmg: number): void {
+    const p = this.player;
+    const cosHalf = Math.cos(FLAME.halfAngle);
+    const dirX = Math.cos(ang), dirY = Math.sin(ang);
+    const R2 = FLAME.range * FLAME.range;
+    for (const e of [...this.currentRoom.enemies]) {
+      if (e instanceof Enemy && !e.targetable) continue;
+      const vx = e.x - ox, vy = e.y - oy;
+      const d2 = vx * vx + vy * vy;
+      if (d2 > R2) continue; // hatótávon kívül
+      const d = Math.sqrt(d2) || 1;
+      // szög-teszt: a célhoz mutató egységvektor a kúp tengelyén belül van-e
+      if ((vx / d) * dirX + (vy / d) * dirY < cosHalf) continue;
+      if (e instanceof Enemy && e.blocking) { this.particles.spawn(e.x, e.y, '#cfe0ff', 3, 90, 0.2); continue; }
+      e.hp -= dmg;
+      if (!e.boss) e.flash = 0.05;
+      this.addDamage(e.x, e.y - e.r, dmg, { color: FLAME.hot });
+      if (e instanceof Enemy) {
+        e.applyBurn(2.5);             // a tűz beépített
+        if (p.poison) e.applyPoison(4);
+        if (p.freeze) e.applyFreeze(1.5);
+      }
+      if (e.hp <= 0) this.killEnemy(e);
+    }
+  }
+
+  /**
+   * Lángkúp kirajzolása - igazi TŰZ-hatás: a kúpot sok átfedő, HEGYESEDŐ, ívelt
+   * lángnyelv (flame-lick) adja, mindegyik LINEÁRIS gradienssel (fehér-forró tő →
+   * sárga → narancs → vörös → áttetsző füst-hegy). Nincs kerek/radiális folt (a
+   * „láva-gömb" érzet onnan jött). A mozgás LASSÚ és organikus (alacsony frekvencia
+   * → nem strobe/villog). Forgatott keret: origó a torkolat, +x a tengely.
+   */
+  private drawCone(ctx: CanvasRenderingContext2D): void {
+    if (!this.cone.on) return;
+    const { x, y, ang, t } = this.cone;
+    const R = FLAME.range, ha = FLAME.halfAngle;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+    ctx.globalCompositeOperation = 'lighter';
+
+    const N = 16; // ennyi átfedő lángnyelv adja ki a kúpot
+    for (let i = 0; i < N; i++) {
+      const f = i / (N - 1);
+      const base = -ha + 2 * ha * f;
+      // lassú, organikus lengés (két nem összemérhető, ALACSONY frekvencia)
+      const a = base + 0.09 * Math.sin(t * 2.1 + i * 1.27) + 0.05 * Math.sin(t * 3.3 + i * 0.7);
+      // a középső nyelvek hosszabbak (kúp-forma); a hossz lassan lüktet
+      const center = 1 - Math.abs(f - 0.5) * 1.3;
+      const L = R * (0.5 + 0.46 * center) * (0.72 + 0.28 * Math.sin(t * 2.4 + i * 1.9));
+      if (L < 8) continue;
+      const tipx = Math.cos(a) * L, tipy = Math.sin(a) * L;
+      const baseW = Math.max(3, R * 0.055);
+      const nx = -Math.sin(base), ny = Math.cos(base);  // a tő merőlegese (szélesség-irány)
+      const bend = 0.16 * Math.sin(t * 1.6 + i) * L;     // a nyelv enyhén oldalra hajlik
+      const mx = Math.cos(a) * L * 0.5 + nx * bend, my = Math.sin(a) * L * 0.5 + ny * bend;
+      const g = ctx.createLinearGradient(0, 0, tipx, tipy);
+      g.addColorStop(0.0, 'rgba(255,248,214,0.82)'); // fehér-forró tő
+      g.addColorStop(0.25, 'rgba(255,196,90,0.7)');  // sárga
+      g.addColorStop(0.55, 'rgba(255,116,28,0.48)'); // narancs
+      g.addColorStop(0.8, 'rgba(214,48,12,0.26)');   // vörös
+      g.addColorStop(1.0, 'rgba(150,22,8,0)');        // áttetsző, füstös hegy
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(nx * baseW, ny * baseW);
+      ctx.quadraticCurveTo(mx + nx * baseW * 0.5, my + ny * baseW * 0.5, tipx, tipy);
+      ctx.quadraticCurveTo(mx - nx * baseW * 0.5, my - ny * baseW * 0.5, -nx * baseW, -ny * baseW);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * Felhúzott csapás (#5) töltés-kijelző: a játékos körül egy gyűlő ív + a most
+   * leadható sebzés száma. Csak töltés közben (`player.charging`) látszik; a
+   * célzásirányból két oldalra nő, full töltésnél pulzál.
+   */
+  private drawCharge(ctx: CanvasRenderingContext2D): void {
+    const p = this.player;
+    if (!p.chargeMode || !p.charging || !p.alive) return;
+    const f = p.chargeFraction();
+    if (f <= 0) return;
+    const dir = p.chargeDir;
+    const ang0 = Math.atan2(dir.y, dir.x);
+    const R = p.r + 12;
+    const full = f >= 1;
+
+    ctx.save();
+    // halvány háttér-gyűrű (a teljes kört jelzi)
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, R, 0, TAU);
+    ctx.stroke();
+    // töltés-ív: a célzásirány körül szimmetrikusan nő (f arányban)
+    const sweep = TAU * f;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = full ? CHARGE.glow : CHARGE.ring;
+    ctx.shadowColor = CHARGE.glow;
+    ctx.shadowBlur = 6 + 10 * f;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, R, ang0 - sweep / 2, ang0 + sweep / 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // full töltésnél pulzáló jel a torkolat irányában
+    if (full) {
+      const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 70);
+      ctx.fillStyle = `rgba(255,210,74,${pulse.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(p.x + dir.x * (R + 5), p.y + dir.y * (R + 5), 4, 0, TAU);
+      ctx.fill();
+    }
+    // sebzés-előnézet a fej fölött (a valós pont-skálán, mint a HUD)
+    ctx.font = '600 13px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = full ? '#ffe9a0' : '#ffd24a';
+    ctx.shadowColor = 'rgba(0,0,0,0.7)';
+    ctx.shadowBlur = 3;
+    ctx.fillText(p.chargedDamage().toFixed(0), p.x, p.y - p.r - 14);
+    ctx.restore();
+  }
+
   private updateFamiliars(dt: number): void {
     const p = this.player;
     this.familiarT += dt;
@@ -1538,6 +1933,8 @@ export class World {
     if (this._cheats.maxGold) this.player.coins = CHEAT_MAX_GOLD;
 
     this.player.update(dt, this);
+    this.updateBeam(dt); // Kénkő-sugár (#1): folyamatos sugár sebzése/rajz-állapota
+    this.updateCone(dt); // Lángkúp (#4): folyamatos kúp-AoE sebzése + égő talaj
     this.updateFamiliars(dt); // keringő orbok sebzése (Wave 4)
 
     // aktív skill (E) + robbanószer lerakás (T = TNT, B = bomba)
@@ -1565,6 +1962,13 @@ export class World {
       const t = this.tears[i]!;
       t.update(dt, this);
       if (t.dead) this.tears.splice(i, 1);
+    }
+
+    // Pecsétgyűrűk (#2): utazó sebző-korongok
+    for (let i = this.rings.length - 1; i >= 0; i--) {
+      const r = this.rings[i]!;
+      r.update(dt, this);
+      if (r.dead) this.rings.splice(i, 1);
     }
 
     // ellenség-lövedékek
@@ -1928,7 +2332,11 @@ export class World {
 
     for (const e of room.enemies) e.draw(ctx);
     for (const t of this.tears) t.draw(ctx);
+    for (const r of this.rings) r.draw(ctx); // Pecsétgyűrűk (#2)
+    this.drawBeam(ctx); // Kénkő-sugár (#1) az ellenfelek fölött, a játékos alatt
+    this.drawCone(ctx); // Lángkúp (#4) ugyanitt
     if (this.player.alive) this.player.draw(ctx);
+    this.drawCharge(ctx); // Felhúzott csapás (#5) töltés-gyűrű a játékos fölött
     this.drawFamiliars(ctx); // keringő orbok + blokkoló légy (Wave 4)
     this.drawAttachedTicks(ctx); // a játékoson ülő kullancsok
 
@@ -2068,7 +2476,11 @@ export class World {
     ctx.shadowBlur = 0;
     for (const e of room.enemies) e.draw(ctx);
     for (const t of this.tears) t.draw(ctx);
+    for (const r of this.rings) r.draw(ctx); // Pecsétgyűrűk (#2) a labirintusban is
+    this.drawBeam(ctx); // Kénkő-sugár (#1) a labirintusban is
+    this.drawCone(ctx); // Lángkúp (#4) a labirintusban is
     if (this.player.alive) this.player.draw(ctx);
+    this.drawCharge(ctx); // Felhúzott csapás (#5) a labirintusban is
     this.drawFamiliars(ctx);
     this.drawAttachedTicks(ctx);
     this.hazards.drawFog(ctx);
@@ -2147,6 +2559,7 @@ export class World {
     }
     const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 120);
     for (const t of this.tears) lt.add(t.x + offX, t.y + offY, t.r * 7, t.color, 0.8);
+    for (const r of this.rings) lt.add(r.x + offX, r.y + offY, r.rad * 1.6, r.color, 0.7); // Pecsétgyűrűk (#2) fénye
     for (const b of this.ebullets) {
       const col = b.poison || b.slime ? '#bfff6a' : b.slow ? '#9fdf4a' : '#ff9a5a';
       lt.add(b.x + offX, b.y + offY, (b.r + 6) * 4, col, 0.7);

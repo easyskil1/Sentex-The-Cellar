@@ -439,6 +439,22 @@ export function chapterBossName(ch: Chapter): string {
 }
 
 /**
+ * Gótikus latin alcím a boss-introhoz (#60). Nyelv-SEMLEGES (latin), ezért itt
+ * él, nem az i18n EN/HU térképben - mindkét nyelven ugyanaz a hangulati idézet.
+ * Ismeretlen/felhasználói fejezethez üres (akkor csak a kicker + név látszik).
+ */
+const BOSS_QUOTES: Record<string, string> = {
+  pince: 'Ex putredine, vita',          // A Lárva - rothadásból élet
+  ureg: 'Qui petram vorat',             // A Kőfaló - aki követ fal
+  melyseg: 'De profundis, dominus',     // A Mélység Ura - a mélyből úr
+  necropolis: 'Mors non est finis',     // Sátán - a halál nem a vég
+  dragonlair: 'Igne natus, igne peris', // A Sárkány - tűzből születtél, tűzben veszel
+};
+export function chapterBossQuote(ch: Chapter): string {
+  return BOSS_QUOTES[ch.id] ?? '';
+}
+
+/**
  * Egy globális szintszámból megadja, melyik fejezet és azon belül hányadik szint.
  * CSAK a kampány-fejezeteket veszi figyelembe (a dungeon/különleges pályák nem
  * a fő ívben vannak).

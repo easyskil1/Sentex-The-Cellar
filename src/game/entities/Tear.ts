@@ -1,6 +1,7 @@
 import type { World } from '../World';
 import { Enemy, type IEnemy } from './enemies/Enemy';
 import { TAU, clamp, dist2, shade } from '../../engine/math';
+import { tearRadiusMul } from '../settings';
 
 /** A játékos könnyének viselkedés-módosítói (perkekből). Lásd ABILITY_IDEAS.md. */
 export interface TearBehavior {
@@ -92,13 +93,13 @@ export class Tear {
         this.x = clamp(this.x, rc.x + 5, rc.x + rc.w - 5);
         this.y = clamp(this.y, rc.y + 5, rc.y + rc.h - 5);
         this.bounces--;
-      } else { this.die(world); return; }
+      } else { this.impactSpark(world); this.die(world); return; }
     }
 
     // kövek: a szellem-könny átrepül felettük; a többi elhal (vagy pattan)
     if (!this.spectral && world.shotHitObstacle(this.x, this.y, this.dmg)) {
       if (this.bounces > 0) { this.vx *= -1; this.vy *= -1; this.bounces--; }
-      else { this.die(world); return; }
+      else { this.impactSpark(world); this.die(world); return; }
     }
 
     // ellenség-találat — broad-phase a CollisionSystem térrácsán (csak a közeli
@@ -142,21 +143,27 @@ export class Tear {
     }
   }
 
-  /** Lánc-villám: a találat a közeli ellenfelekre is átível (fél sebzés, max 3 cél). */
+  /**
+   * Lánc-villám: a találat a közeli ellenfelekre is átível (fél sebzés, max 3 cél).
+   * SZINERGIA „hősokk" (freeze+shock): a fagyott célon a villám teljes sebzéssel és
+   * dupla ívvel (max 6 cél) csap át - a `freeze` flag a célt ekkor már lefagyasztotta.
+   */
   private chain(from: IEnemy, world: World): void {
-    const R = 120, R2 = R * R;
+    const hot = this.freeze; // freeze+shock együtt → a `from` lefagyott (lásd a találat-ágat)
+    const R = hot ? 150 : 120, R2 = R * R;
+    const mul = hot ? 1 : 0.5, maxArcs = hot ? 6 : 3, col = hot ? '#9fe8ff' : '#fff36a';
     let arcs = 0;
     const near = world.collision.enemiesNear(from.x, from.y, R, this.chainBuf);
     for (let i = 0; i < near.length; i++) {
       const e = near[i]!;
       if (e === from) continue;
       if (dist2(from.x, from.y, e.x, e.y) >= R2) continue;
-      e.hp -= this.dmg * 0.5;
+      e.hp -= this.dmg * mul;
       if (!e.boss) e.flash = 0.08;
-      world.addDamage(e.x, e.y - e.r, this.dmg * 0.5, { color: '#fff36a' });
-      world.particles.spawn(e.x, e.y, '#fff36a', 4, 120, 0.25);
+      world.addDamage(e.x, e.y - e.r, this.dmg * mul, { color: col });
+      world.particles.spawn(e.x, e.y, col, hot ? 7 : 4, 120, 0.25);
       if (e.hp <= 0) world.killEnemy(e);
-      if (++arcs >= 3) break;
+      if (++arcs >= maxArcs) break;
     }
   }
 
@@ -184,6 +191,17 @@ export class Tear {
     e.y = clamp(e.y + (this.vy / m) * 16, rc.y + e.r, rc.y + rc.h - e.r);
   }
 
+  /**
+   * #67 becsapódás-szikra: rövid szikra-burst, amikor a lövedék FALba/KŐbe csapódik
+   * (eddig csak az ellenfél-találat adott részecskét). A „Játékérzet" kapcsoló alatt,
+   * mint a csőtorkolat-villanás; a könny színében, hogy a build vizuálját kövesse.
+   */
+  private impactSpark(world: World): void {
+    if (!world.gameFeel) return;
+    world.particles.spawn(this.x, this.y, this.color, 5, 130, 0.22);
+    world.particles.spawn(this.x, this.y, '#fff2c8', 3, 80, 0.16); // fényes mag-szikra
+  }
+
   /** Zöld, nyálkás méreg-paca a becsapódás helyén (Méreg-csepp). */
   private poisonSplat(world: World): void {
     world.particles.spawn(this.x, this.y, '#7ad046', 18, 130, 0.55); // szétfröccsenő nyálka
@@ -199,17 +217,22 @@ export class Tear {
     if (this.split && this.dmg > 0) {
       const base = Math.atan2(this.vy, this.vx) + Math.PI; // hátrafelé szór szét
       const sp = (Math.hypot(this.vx, this.vy) || 200) * 0.8;
+      // SZINERGIA „célkereső szilánkok" (split+homing): a szilánkok öröklik a homingot
+      const shardBehavior = this.homing ? { homing: true } : {};
       for (const off of [-0.5, 0.5]) {
         const a = base + off;
         // a szilánkok nem hasadnak tovább (sima lövedék), de öröklik a színt/alakot
-        world.tears.push(new Tear(this.x, this.y, Math.cos(a) * sp, Math.sin(a) * sp, this.dmg * 0.6, 0.4, {}, this.color, this.squashY));
+        world.tears.push(new Tear(this.x, this.y, Math.cos(a) * sp, Math.sin(a) * sp, this.dmg * 0.6, 0.4, shardBehavior, this.color, this.squashY));
       }
     }
     this.dead = true;
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
-    const ry = this.r * this.squashY; // a haladásra MERŐLEGES fél-tengely (lapításnál kisebb)
+    // #68 „vastag lövedék" CSAK vizuális (láthatóság): a kirajzolt sugár nő, az
+    // ÜTKÖZÉSI sugár (this.r) marad → nem csalás, csak jobban látod a lövedéked.
+    const dr = this.r * tearRadiusMul();
+    const ry = dr * this.squashY; // a haladásra MERŐLEGES fél-tengely (lapításnál kisebb)
     // a lapított korongot a haladási irányba forgatjuk: a hosszanti tengely a
     // sebességvektorral áll (körnél, squashY=1, a forgatásnak nincs hatása)
     const ang = this.squashY !== 1 ? Math.atan2(this.vy, this.vx) : 0;
@@ -220,12 +243,12 @@ export class Tear {
     ctx.shadowColor = this.color;
     ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.ellipse(0, 0, this.r, ry, 0, 0, TAU);
+    ctx.ellipse(0, 0, dr, ry, 0, 0, TAU);
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.beginPath();
-    ctx.ellipse(-this.r * 0.25, -ry * 0.4, this.r * 0.4, ry * 0.4, 0, 0, TAU);
+    ctx.ellipse(-dr * 0.25, -ry * 0.4, dr * 0.4, ry * 0.4, 0, 0, TAU);
     ctx.fill();
     ctx.restore();
   }

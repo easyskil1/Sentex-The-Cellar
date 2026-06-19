@@ -68,6 +68,14 @@ export interface PerkStats {
   orbital?: boolean;
   /** Blokkoló légy: elnyeli a közeli ellenséges lövedékeket (kapcsoló). */
   shieldFly?: boolean;
+  /** Kénkő-sugár: a könny-lövést folyamatos sugárra cseréli (kapcsoló). */
+  beam?: boolean;
+  /** Lángkúp: a könny-lövést folyamatos kúp-AoE-ra (lángszóró) cseréli (kapcsoló). */
+  flame?: boolean;
+  /** Felhúzott csapás: a rapid-fire-t töltött (felhúzós) lövésre cseréli (kapcsoló). */
+  charge?: boolean;
+  /** Pecsétgyűrű: a sima lövést utazó sebző-korongra cseréli (kapcsoló). */
+  ring?: boolean;
 }
 
 /** GYÁRI hatás-értékek perkenként (a fájlmentő ezt írja át). */
@@ -104,6 +112,12 @@ export const DEFAULT_PERK_STATS: Record<string, PerkStats> = {
   // --- Kísérők (Wave 4: familiar-rendszer) ---
   'Moonstone': { orbital: true },
   'Guardian Fly': { shieldFly: true },
+
+  // --- Alternatív lőmód (Fázis B: tartalmi tengely) ---
+  'Sulfur Beam': { beam: true },
+  'Hellfire Breath': { flame: true },
+  'Charged Shot': { charge: true },
+  'Signet Ring': { ring: true },
 };
 
 /** GYÁRI megjelenési esély-súlyok (alap 1). */
@@ -134,6 +148,10 @@ export const DEFAULT_PERK_WEIGHT: Record<string, number> = {
   'Lightning Eye': 1,
   'Moonstone': 1,
   'Guardian Fly': 1,
+  'Sulfur Beam': 0.8, // build-meghatározó relikvia → kissé ritkább
+  'Hellfire Breath': 0.8,
+  'Charged Shot': 0.8,
+  'Signet Ring': 0.8,
 };
 
 /** Az ÉLŐ (szerkeszthető) másolatok. */
@@ -184,6 +202,10 @@ export function applyPerk(p: Player, name: string): void {
   if (s.shock) p.shock = true;
   if (s.orbital) p.orbitals += 1;
   if (s.shieldFly) p.shieldFly = true;
+  if (s.beam) p.beamMode = true;
+  if (s.flame) p.flameMode = true;
+  if (s.charge) p.chargeMode = true;
+  if (s.ring) p.ringMode = true;
 }
 
 export function resetPerkConfig(): void {

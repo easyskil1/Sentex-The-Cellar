@@ -574,29 +574,253 @@ kbd.wide { min-width: auto; letter-spacing: 0.5px; }
 .name-input:focus { border-color: #f0c878; box-shadow: 0 0 0 3px rgba(240, 200, 120, 0.18); }
 
 /* ---- Teljes képernyős, admin-kinézetű lapok (RANG / BEÁLLÍTÁSOK) ---- */
+/* ════════════════════════════════════════════════════════════════════
+   Teljes-képernyős lapok (RANG / KÓDEX / BEÁLLÍTÁSOK) — a FŐMENÜ hangulatában.
+   Minden szabály a `.sheetpage` alá van szkópolva, hogy az ADMIN
+   (`.overlay.admin`) érintetlen maradjon: meleg, atmoszférikus háttér,
+   Cinzel-tipográfia, bronz/arany paletta. (Az admin marad lapos és funkcionális.)
+   ════════════════════════════════════════════════════════════════════ */
 .overlay.sheetpage {
   justify-content: flex-start;
   align-items: stretch;
-  background: #0e0b14;
+  overflow: hidden;
+  /* a főmenü réteges, meleg radiális háttere */
+  background:
+    radial-gradient(ellipse 58% 48% at 50% 30%, rgba(120, 70, 30, 0.24), transparent 70%),
+    radial-gradient(ellipse at center, rgba(40, 22, 12, 0.5), rgba(6, 4, 9, 0.97));
 }
-/* A tartalmi törzs ugyanúgy néz ki, mint az admin #adminBody */
+/* Pislákoló fáklyafény felülről (mint a főmenün) */
+.overlay.sheetpage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(circle 520px at 50% 6%, rgba(255, 150, 50, 0.12), transparent 60%);
+  pointer-events: none;
+  animation: torch 3.4s ease-in-out infinite;
+}
+/* a fejléc és a törzs a hangulati háttér FÖLÉ kerül; a parázs marad mögötte */
+.sheetpage .admin-bar,
+.sheetpage .page-body { position: relative; z-index: 1; }
+.sheetpage .menu-atmos { z-index: 0; }
+/* A tartalmi törzs: átlátszó (átengedi a hangulatot), vékony arany elválasztó */
 .page-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  background: #0e0b14;
+  background: transparent;
   border-top: 1px solid rgba(240, 200, 120, 0.14);
   padding: 22px clamp(16px, 4vw, 40px) 48px;
   color: #d8cdbf;
   font-size: 14px;
   text-align: left;
 }
+
+/* ── Fejléc: Cinzel-cím + arany ragyogás (mint a főmenü THE CELLAR felirata) ── */
+.sheetpage .admin-bar {
+  background: linear-gradient(180deg, rgba(8, 6, 12, 0.62), transparent);
+  padding: 18px clamp(16px, 4vw, 28px);
+}
+.sheetpage .admin-title {
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: #f3e2bf;
+  text-shadow: 0 3px 0 #5a3a1c, 0 0 28px rgba(255, 160, 60, 0.32);
+}
+/* ── Fülek (Rang/Kódex/Beállítások): bronz→arany Cinzel, aláhúzós aktív (nem tömör pirula) ── */
+.sheetpage .admin-tabs .btn.small {
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  color: #b08a5a;
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 400;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  transition: color 0.18s, border-color 0.18s, transform 0.1s;
+}
+.sheetpage .admin-tabs .btn.small:hover { color: #e8d2a0; transform: translateY(-1px); box-shadow: none; }
+.sheetpage .admin-tabs .btn.small.active {
+  background: none;
+  color: #f0c878;
+  border-bottom-color: rgba(240, 200, 120, 0.7);
+  text-shadow: 0 0 18px rgba(240, 200, 120, 0.35);
+  box-shadow: 0 8px 16px -10px rgba(240, 200, 120, 0.6);
+}
+/* a fejléc jobb oldali csoportja (Kódex: számláló + vissza) */
+.admin-bar-right { display: flex; align-items: center; gap: 16px; }
+/* ── „← VISSZA" gomb: a főmenü szöveg-link stílusában (nincs arany pirula) ── */
+.sheetpage .admin-bar .btn.small {
+  background: none;
+  box-shadow: none;
+  color: #b08a5a;
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 400;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  padding: 8px 6px;
+}
+.sheetpage .admin-bar .btn.small:hover {
+  color: #f0c878;
+  transform: none;
+  box-shadow: none;
+  text-shadow: 0 0 16px rgba(240, 200, 120, 0.4);
+}
+.sheetpage .admin-bar .btn.small:active { transform: translateY(1px); box-shadow: none; }
+
+/* ── kit.ts elemek a lapokon (főleg Beállítások): meleg/arany hangolás ── */
+.sheetpage .adm-h2 {
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #f3e2bf;
+  text-shadow: 0 2px 0 #5a3a1c, 0 0 22px rgba(255, 160, 60, 0.25);
+}
+.sheetpage .adm-sub { color: #a98a64; }
+.sheetpage .adm-panel {
+  background: linear-gradient(180deg, rgba(28, 20, 14, 0.42), rgba(12, 9, 14, 0.42));
+  border: 1px solid rgba(240, 200, 120, 0.14);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.35);
+}
+.sheetpage .adm-panel-title {
+  font-family: "Cinzel", Georgia, serif;
+  letter-spacing: 3px;
+  color: #b08a5a;
+}
+.sheetpage .adm-field-label { color: #e8dcc8; }
+.sheetpage .adm-field-help { color: #8a7256; }
 /* Profil-sor a RANG lapon: érem + adatok */
 .rank-row { display: flex; align-items: center; gap: 20px; }
 .rank-meta { flex: 1 1 auto; min-width: 0; }
 .page-medal { width: 96px; height: 96px; flex: 0 0 auto; }
 @media (max-width: 520px) {
   .rank-row { flex-direction: column; text-align: center; }
+}
+
+/* ─── BESTIÁRIUM: katakomba-fal ──────────────────────────────────────── */
+.best-count {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: rgba(240, 200, 120, 0.7);
+}
+.best-layout {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+/* A fal: a fülkék rácsa egy sötét, repedezett kőlapon */
+.best-wall {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+  padding: 14px;
+  border-radius: 8px;
+  /* ugyanaz, mint a Beállítások panel (.adm-panel): áttetsző meleg, arany keret,
+     nincs vízszintes kő-rétegmintázat */
+  background: linear-gradient(180deg, rgba(28, 20, 14, 0.42), rgba(12, 9, 14, 0.42));
+  border: 1px solid rgba(240, 200, 120, 0.14);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.35);
+}
+/* Egy bevésett fülke: sötét beágyazott mélyedés a kőben */
+.best-niche {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 6px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  background: radial-gradient(80% 80% at 50% 35%, #2a2014, #0e0a06 95%);
+  box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.8), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: box-shadow 0.15s, transform 0.1s;
+}
+.best-niche:hover {
+  box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(240, 200, 120, 0.45);
+  transform: translateY(-1px);
+}
+.best-niche.active {
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.7), 0 0 14px rgba(240, 200, 120, 0.5);
+  border-color: rgba(240, 200, 120, 0.6);
+}
+.best-niche.locked { opacity: 0.78; cursor: pointer; }
+.best-niche-canvas { display: block; image-rendering: auto; }
+.best-niche-name {
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-align: center;
+  line-height: 1.1;
+  color: #c8bca8;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.best-niche.locked .best-niche-name { color: #6e6354; }
+/* Szekció-fejléc a falon (Lények / Bossok): teljes sort átfogó, vésett felirat */
+.best-section {
+  grid-column: 1 / -1;
+  margin: 6px 2px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(240, 200, 120, 0.18);
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #b08850;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.best-section:first-child { margin-top: 0; }
+/* Boss-fülke: finom vörös-arany akcentus, hogy elkülönüljön a lényektől */
+.best-niche.best-boss {
+  background: radial-gradient(80% 80% at 50% 35%, #34201a, #0e0a06 95%);
+  border-color: rgba(170, 90, 50, 0.45);
+}
+/* Részletező-tábla: a kijelölt lény nagyban, név + statok */
+.best-detail {
+  flex: 0 0 240px;
+  position: sticky;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px 22px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(28, 20, 14, 0.42), rgba(12, 9, 14, 0.42));
+  border: 1px solid rgba(240, 200, 120, 0.14);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.35);
+}
+.best-detail-canvas {
+  background: radial-gradient(60% 60% at 50% 45%, rgba(70, 50, 28, 0.45), transparent 75%);
+  border-radius: 6px;
+}
+.best-detail-name {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #f0c878;
+  text-align: center;
+}
+.best-detail-stats { display: flex; gap: 16px; }
+.best-stat {
+  font-size: 13px;
+  color: #d8cdbf;
+  letter-spacing: 0.04em;
+}
+.best-detail-hint {
+  font-size: 12px;
+  color: #8a7c66;
+  text-align: center;
+  line-height: 1.4;
+  max-width: 200px;
+}
+@media (max-width: 640px) {
+  .best-layout { flex-direction: column; }
+  .best-detail { flex-basis: auto; width: 100%; position: static; }
 }
 
 /* A RANG-hub almenüi a fejléc admin-tabs sávjában élnek (admin-mintára), így a
@@ -610,8 +834,8 @@ kbd.wide { min-width: auto; letter-spacing: 0.5px; }
   gap: 10px;
 }
 .stat-tile {
-  background: #0f0c17;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(28, 20, 14, 0.42), rgba(12, 9, 14, 0.42));
+  border: 1px solid rgba(240, 200, 120, 0.14);
   border-radius: 10px;
   padding: 14px 16px;
   text-align: left;
@@ -772,6 +996,14 @@ kbd.wide { min-width: auto; letter-spacing: 0.5px; }
 .adm-card-desc { color: #b8ac9a; font-size: 13px; line-height: 1.45; flex: 1; }
 .adm-card-meta { color: #8a7f70; font-size: 12px; }
 .adm-dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+/* Animált perk/skill ikon-előnézet az admin kártyán (procedurális, mint a Kódexben) */
+.adm-icon-canvas {
+  display: block;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  background: radial-gradient(70% 70% at 50% 40%, #1a1426, #0c0912 95%);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7);
+}
 .adm-card .adm-btn { margin-top: 4px; }
 
 /* Mező (címke + vezérlő), sorvonallal */

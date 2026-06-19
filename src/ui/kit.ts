@@ -172,6 +172,8 @@ export interface ToggleOpts {
   /** Be/ki feliratok — alapból magyar (admin); a játék-UI angolt ad át. */
   onLabel?: string;
   offLabel?: string;
+  /** Opcionális magyarázó alcím a címke alatt (kis, halvány). */
+  hint?: string;
 }
 
 /** Címkézett be/ki kapcsoló, sorvonallal. */
@@ -188,7 +190,10 @@ export function toggleField(o: ToggleOpts): HTMLElement {
     o.onChange(val);
   });
   return el('label', { class: 'adm-field' }, [
-    el('span', { class: 'adm-field-label', text: o.label }),
+    el('div', { class: 'adm-field-text' }, [
+      el('span', { class: 'adm-field-label', text: o.label }),
+      o.hint ? el('span', { class: 'adm-field-help', text: o.hint }) : null,
+    ]),
     btn,
   ]);
 }

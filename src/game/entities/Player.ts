@@ -1,9 +1,10 @@
 import type { World } from '../World';
 import type { Item } from '../content/items';
 import type { Vec2 } from '../../engine/math';
-import { normalize } from '../../engine/math';
-import { Tear } from './Tear';
-import { PLAYER_BASE, ROOM } from '../config';
+import { normalize, clamp } from '../../engine/math';
+import { Tear, type TearBehavior } from './Tear';
+import { Ring } from './Ring';
+import { PLAYER_BASE, ROOM, CHARGE, RING } from '../config';
 import { drawPlayer, defaultBodyLook, type BodyLook } from './PlayerRenderer';
 
 /** A játékos figura: mozgás, lövés, szobaváltás, kirajzolás. */
@@ -45,6 +46,43 @@ export class Player {
   /** Kísérők (Wave 4): keringő sebző orbok száma + blokkoló légy. */
   orbitals = 0;
   shieldFly = false;
+  /**
+   * Kénkő-sugár lőmód (#1, relikvia): ha igaz, a sima könny-lövés helyett
+   * FOLYAMATOS sugarat ad le (a `World` kezeli a sebzést/rajzot). A `beaming`
+   * tranziens (csak abban a frame-ben igaz, amikor épp tüzel), a `beamTickAcc`
+   * a sebzés-tick időzítője (a `World.updateBeam` lépteti). Lásd config BEAM.
+   */
+  beamMode = false;
+  beaming = false;
+  beamDir: Vec2 = { x: 0, y: 1 };
+  beamTickAcc = 0;
+  /**
+   * Lángkúp lőmód (#4, relikvia): ha igaz, a sima lövés helyett FOLYAMATOS kúp-AoE
+   * (lángszóró) megy. A `coning` tranziens (csak abban a frame-ben, amikor tüzel),
+   * a `coneTickAcc` a sebzés-, a `coneFloorAcc` az égő-talaj-ütem időzítője. Ha a
+   * sugár ÉS a kúp is megvan, a sugár nyer (lásd Player.update). Config FLAME.
+   */
+  flameMode = false;
+  coning = false;
+  coneDir: Vec2 = { x: 0, y: 1 };
+  coneTickAcc = 0;
+  coneFloorAcc = 0;
+  /**
+   * Felhúzott csapás lőmód (#5, relikvia): ha igaz, a rapid-fire helyett TÖLTÖTT
+   * lövés megy - nyomva tartás tölt (`chargeT` nő), elengedés ad le EGY felskálázott
+   * könnycseppet (lásd `releaseCharge`). A `charging` tranziens (csak abban a frame-ben
+   * igaz, amikor épp húzol fel), HUD-jelzéshez. Config CHARGE.
+   */
+  chargeMode = false;
+  charging = false;
+  chargeT = 0;
+  chargeDir: Vec2 = { x: 0, y: 1 };
+  /**
+   * Pecsétgyűrű lőmód (#2, relikvia): ha igaz, a sima lövés helyett utazó
+   * sebző-KORONG (`Ring`) indul a célzásirányba (a `World.rings`-be). A `shootRing`
+   * adja le, a `fireRate` üteme szerint. Config RING.
+   */
+  ringMode = false;
   /** Zavar-státusz (a Zavaró ellenfél): amíg >0, a mozgás-irány FORDÍTOTT. */
   confusedT = 0;
 
@@ -93,6 +131,10 @@ export class Player {
       pierce: false, bounce: false, homing: false, spectral: false, split: false, tearKnock: false,
       burn: false, poison: false, freeze: false, shock: false,
       orbitals: 0, shieldFly: false, confusedT: 0,
+      beamMode: false, beaming: false, beamTickAcc: 0,
+      flameMode: false, coning: false, coneTickAcc: 0, coneFloorAcc: 0,
+      chargeMode: false, charging: false, chargeT: 0,
+      ringMode: false,
       hp: PLAYER_BASE.maxHp, maxHp: PLAYER_BASE.maxHp, invuln: 0, alive: true, coins: 0,
       slowT: 0, slowMul: 1, attachedTicks: [],
       luck: 0, sight: PLAYER_BASE.sight, fireCd: 0, lastShotDir: { x: 0, y: 1 },
@@ -123,6 +165,9 @@ export class Player {
 
   update(dt: number, world: World): void {
     if (!this.alive) return;
+    this.beaming = false; // a sugár csak akkor él, ha ebben a frame-ben tüzelünk
+    this.coning = false;  // a lángkúp ugyanígy tranziens
+    this.charging = false; // a töltés-jelzés is tranziens (HUD)
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.invuln = Math.max(0, this.invuln - dt);
     this.slowT = Math.max(0, this.slowT - dt);
@@ -176,8 +221,29 @@ export class Player {
     }
     if (sx !== 0 || sy !== 0) {
       const dir = normalize(sx, sy);
-      this.shoot(dir, world);
+      if (this.beamMode) {
+        // Kénkő-sugár: nincs könny-lövés; jelezzük a World-nek, hogy ad le sugarat.
+        this.beaming = true;
+        this.beamDir = dir;
+      } else if (this.flameMode) {
+        // Lángkúp: a sima lövés helyett folyamatos kúp-AoE (a World kezeli).
+        this.coning = true;
+        this.coneDir = dir;
+      } else if (this.chargeMode) {
+        // Felhúzott csapás: nyomva tartás tölt; az elengedés (lentebb) ad le.
+        this.charging = true;
+        this.chargeT = Math.min(CHARGE.maxTime, this.chargeT + dt);
+        this.chargeDir = dir;
+      } else if (this.ringMode) {
+        // Pecsétgyűrű: a sima lövés helyett utazó sebző-korong (a fireRate üteme szerint).
+        this.shootRing(dir, world);
+      } else {
+        this.shoot(dir, world);
+      }
       this.lastShotDir = dir;
+    } else if (this.chargeMode && this.chargeT > 0) {
+      // Felhúzott csapás: elengedéskor a felhúzott lövés leadása.
+      this.releaseCharge(world);
     }
   }
 
@@ -224,11 +290,7 @@ export class Player {
     this.fireCd = this.fireRate;
     const ss = this.shotSpeed;
     const range = this.range * this.rangeMul;
-    const behavior = {
-      pierce: this.pierce, bounce: this.bounce, homing: this.homing,
-      spectral: this.spectral, split: this.split, knockback: this.tearKnock,
-      burn: this.burn, poison: this.poison, freeze: this.freeze, shock: this.shock,
-    };
+    const behavior = this.tearBehavior();
     const tearCol = this.bodyLook.tearColor; // tárgy adta könny-szín (undefined → alap kék)
     const tearSquash = this.bodyLook.tearSquashY; // tárgy adta lapítás (undefined → kör)
     const count = Math.max(1, 1 + Math.round(this.shots));
@@ -262,6 +324,99 @@ export class Player {
       this.vx -= dir.x * 26;                  // #66 enyhe visszarúgás
       this.vy -= dir.y * 26;
       world.addKick(-dir.x, -dir.y, 1.8);     // #70 kamera-kick (a lövés ellen)
+      world.setCamLook(dir.x, dir.y);         // #70 kamera-LERP (a lövésirányba simul)
+    }
+  }
+
+  /** A jelenlegi flagekből összeállított könny-viselkedés (shoot + töltött lövés közös). */
+  private tearBehavior(): TearBehavior {
+    return {
+      pierce: this.pierce, bounce: this.bounce, homing: this.homing,
+      spectral: this.spectral, split: this.split, knockback: this.tearKnock,
+      burn: this.burn, poison: this.poison, freeze: this.freeze, shock: this.shock,
+    };
+  }
+
+  /** Töltöttség 0..1 (HUD + lövés-skálázás). */
+  chargeFraction(): number {
+    return clamp(this.chargeT / CHARGE.maxTime, 0, 1);
+  }
+
+  /**
+   * A jelenlegi töltöttséghez tartozó sebzés-szorzó. Anti-OP: a full-szorzó
+   * NET-DPS-PARITÁSRA van állítva (a töltés-idő + a rákövetkező fireCd ELLEN a
+   * sima lövés DPS-ével), `dpsMul` enyhe burst-prémiummal. Így a koncentrált
+   * egy-lövéses sebzés az előny, nem a net-DPS.
+   */
+  private chargeMul(): number {
+    const fr = Math.max(0.001, this.fireRate);
+    const maxMul = CHARGE.dpsMul * (CHARGE.maxTime + fr) / fr;
+    return 1 + (maxMul - 1) * this.chargeFraction();
+  }
+
+  /** A MOST leadható töltött lövés sebzése (HUD-előnézethez is). */
+  chargedDamage(): number {
+    return this.dmg * this.chargeMul();
+  }
+
+  /** Felhúzott csapás: az elengedéskor leadott, töltöttség-arányos lövés. */
+  private releaseCharge(world: World): void {
+    const t = this.chargeT;
+    const f = this.chargeFraction();
+    const mul = this.chargeMul();
+    this.chargeT = 0;
+    if (t < CHARGE.minTime || this.fireCd > 0) return; // túl rövid / még töltődik a ráta
+    this.fireCd = this.fireRate; // a tap-spam ellen (a sima lövéssel közös ráta)
+    const dir = this.chargeDir;
+    const dx = dir.x, dy = dir.y;
+    const ss = this.shotSpeed * CHARGE.speedMul;
+    const range = this.range * this.rangeMul;
+    const vx = dx * ss + this.vx * 0.3;
+    const vy = dy * ss + this.vy * 0.3;
+    const tearCol = this.bodyLook.tearColor;
+    const tearSquash = this.bodyLook.tearSquashY;
+    // a töltött lövés EGY koncentrált, nagyobb test-sugarú csepp (nincs legyező/dupla)
+    const tear = new Tear(this.x + dx * 14, this.y + dy * 14, vx, vy, this.dmg * mul, range, this.tearBehavior(), tearCol, tearSquash);
+    tear.r *= 1 + (CHARGE.sizeMul - 1) * f; // töltöttség-arányos méret (vizuál + hitbox)
+    world.tears.push(tear);
+    world.audio.shoot();
+
+    // Játékérzet: a torkolat-villanás/visszarúgás/kick töltöttség szerint erősödik.
+    if (world.gameFeel) {
+      const mx = this.x + dx * 16, my = this.y + dy * 16;
+      world.particles.spawn(mx, my, tearCol ?? '#ffe9b0', 5 + Math.round(9 * f), 130, 0.22);
+      this.vx -= dx * (26 + 46 * f);
+      this.vy -= dy * (26 + 46 * f);
+      world.addKick(-dx, -dy, 1.8 + 2.8 * f);
+      world.setCamLook(dx, dy);
+    }
+  }
+
+  /** Pecsétgyűrű (#2): utazó sebző-korong leadása a célzásirányba (a fireRate üteme szerint). */
+  private shootRing(dir: Vec2, world: World): void {
+    if (this.fireCd > 0) return;
+    this.fireCd = this.fireRate;
+    const dx = dir.x, dy = dir.y;
+    const ss = this.shotSpeed * RING.speedMul;
+    const life = this.range * this.rangeMul; // a hatótáv mint élettartam (mint a könnynél)
+    const vx = dx * ss + this.vx * 0.3;
+    const vy = dy * ss + this.vy * 0.3;
+    // a korong a játékos elé indul; öröklődő elemi flagek (burn/poison/freeze)
+    world.rings.push(new Ring(
+      this.x + dx * 18, this.y + dy * 18, vx, vy, this.dmg, life,
+      { burn: this.burn, poison: this.poison, freeze: this.freeze },
+      this.bodyLook.tearColor ?? RING.core,
+    ));
+    world.audio.shoot();
+
+    // Játékérzet: torkolat-villanás + visszarúgás + kamera-kick (mint a sima lövésnél).
+    if (world.gameFeel) {
+      const mx = this.x + dx * 16, my = this.y + dy * 16;
+      world.particles.spawn(mx, my, RING.glow, 4, 90, 0.16);
+      this.vx -= dx * 26;
+      this.vy -= dy * 26;
+      world.addKick(-dx, -dy, 1.8);
+      world.setCamLook(dx, dy);
     }
   }
 

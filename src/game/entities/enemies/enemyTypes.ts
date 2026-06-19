@@ -224,10 +224,13 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
  *   explosive — halálkor körkörös golyózápor
  *   vengeful  — halálkor mérgező tócsát hagy
  *   regen     — folyamatosan gyógyul (a DoT-ot ellensúlyozza)
+ *   shielded  — időszakosan blokkol (a Blokkoló mechanikájából)
+ *   frozen    — fagyos aura: a közeli játékost lassítja
+ *   summoner  — időnként gyenge csótány-csatlóst idéz (véges számban)
  */
-export type ChampionTrait = 'tough' | 'swift' | 'giant' | 'explosive' | 'vengeful' | 'regen';
+export type ChampionTrait = 'tough' | 'swift' | 'giant' | 'explosive' | 'vengeful' | 'regen' | 'shielded' | 'frozen' | 'summoner';
 
-export const CHAMPION_TRAITS: readonly ChampionTrait[] = ['tough', 'swift', 'giant', 'explosive', 'vengeful', 'regen'];
+export const CHAMPION_TRAITS: readonly ChampionTrait[] = ['tough', 'swift', 'giant', 'explosive', 'vengeful', 'regen', 'shielded', 'frozen', 'summoner'];
 
 /** Champion átszínezés — ránézésre megkülönböztető (a részletes kinézet később). */
 export const CHAMPION_COLORS: Record<ChampionTrait, { col: string; col2: string }> = {
@@ -237,6 +240,9 @@ export const CHAMPION_COLORS: Record<ChampionTrait, { col: string; col2: string 
   explosive: { col: '#ff7a3a', col2: '#5a1a08' },
   vengeful: { col: '#9fd84a', col2: '#2a3a10' },
   regen: { col: '#ff8ab0', col2: '#5a1a30' },
+  shielded: { col: '#b0c4e0', col2: '#1a2a4a' },
+  frozen: { col: '#aef0ff', col2: '#0a3a5a' },
+  summoner: { col: '#c89af0', col2: '#3a1a5a' },
 };
 
 // ════════════════════════════════════════════════════════════════════════

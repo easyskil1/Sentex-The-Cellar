@@ -60,6 +60,7 @@
       <nav class="menu-nav">
         <button class="menu-link primary" data-action="start" data-i18n="nav.play">Play</button>
         <button class="menu-link" data-action="rank" data-i18n="nav.rank">Rank</button>
+        <button class="menu-link" data-action="bestiary" data-i18n="nav.bestiary">Codex</button>
         <button class="menu-link" data-action="settings" data-i18n="nav.settings">Settings</button>
         <button class="menu-link" data-action="credits" data-i18n="nav.credits">Credits</button>
         <button class="menu-link" data-action="admin" data-dev-only>Admin</button>
@@ -117,17 +118,30 @@
   <!-- RANG: teljes képernyős, admin-kinézetű lap -->
   <div id="rank" class="overlay sheetpage hidden">
     <div class="admin-bar">
-      <span class="admin-title" data-i18n="header.rank">🏅 RANK</span>
+      <span class="admin-title" data-i18n="header.rank">RANK</span>
       <div class="admin-tabs" id="rankTabs"></div>
       <button class="btn small" data-action="menu" data-i18n="common.back">← BACK</button>
     </div>
     <div id="rankBody" class="page-body"></div>
   </div>
 
+  <!-- KÓDEX: fülezett gyűjtemény (lények / bossok / tárgyak / képességek) -->
+  <div id="bestiary" class="overlay sheetpage hidden">
+    <div class="admin-bar">
+      <span class="admin-title" data-i18n="header.bestiary">CODEX</span>
+      <div class="admin-tabs" id="codexTabs"></div>
+      <div class="admin-bar-right">
+        <span class="best-count" id="bestiaryCount"></span>
+        <button class="btn small" data-action="menu" data-i18n="common.back">← BACK</button>
+      </div>
+    </div>
+    <div id="bestiaryBody" class="page-body"></div>
+  </div>
+
   <!-- BEÁLLÍTÁSOK: teljes képernyős, admin-kinézetű lap -->
   <div id="settings" class="overlay sheetpage hidden">
     <div class="admin-bar">
-      <span class="admin-title" data-i18n="header.settings">⚙ SETTINGS</span>
+      <span class="admin-title" data-i18n="header.settings">SETTINGS</span>
       <div class="admin-tabs" id="settingsTabs"></div>
       <button class="btn small" data-action="menu" data-i18n="common.back">← BACK</button>
     </div>

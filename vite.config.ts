@@ -1,10 +1,10 @@
 import { defineConfig } from 'vite';
 
 /**
- * Publikus játék-build. Relatív `base`, hogy a játék GitHub Pages alkönyvtárból
+ * Publikus játék-build (GENERÁLT - lásd a fő repó scripts/build-public.mjs-ét).
+ * Relatív `base`, hogy a játék GitHub Pages alkönyvtárból
  * (easyskil1.github.io/Sentex-The-Cellar/) is helyesen töltse az assetjeit.
- * A fejlesztői admin (és a hozzá tartozó dev mentő-pluginek) nincsenek a publikus
- * tükörben - csak a játék.
+ * A fejlesztői admin (és a dev mentő-pluginek) nincsenek a publikus tükörben.
  */
 export default defineConfig({
   base: './',

@@ -213,6 +213,15 @@ function drawBossIntro(ctx: CanvasRenderingContext2D, world: World, w: number, h
   ctx.closePath();
   ctx.fill();
 
+  // ---- latin alcím a vonal alatt: halvány, dőlt, kissé késleltetve jelenik meg ----
+  if (intro.quote) {
+    const subA = alpha * clamp((age - FADE_IN) / 0.4, 0, 1); // a név után úszik be
+    ctx.globalAlpha = subA * 0.8;
+    ctx.fillStyle = '#9c814e';
+    ctx.font = `italic 500 15px ${SERIF}`;
+    drawSpacedText(ctx, intro.quote, cx, lineY + 20, 2);
+  }
+
   ctx.restore();
   ctx.globalAlpha = 1;
 }

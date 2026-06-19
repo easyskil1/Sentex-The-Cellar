@@ -76,6 +76,11 @@ export interface Hazard {
   age: number; // mp a keletkezés óta (benövéshez / animációhoz)
   tick: number; // sebző-ütem visszaszámláló
   arm?: number; // telegraf-idő (mp): eddig csak látszik a zóna, NEM sebez (becsapódó AoE-hoz)
+  /**
+   * Kié a veszély. `enemy` (alap): a JÁTÉKOST sebzi (ellenfél-tűz/méreg). `player`:
+   * a Lángkúp (#4) égő nyoma - az ELLENFELET sebzi, a játékosra ártalmatlan.
+   */
+  owner?: 'player' | 'enemy';
 }
 
 /** Lebegő szöveg (pl. +pont, +szív). */

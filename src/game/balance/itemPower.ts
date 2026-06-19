@@ -40,6 +40,12 @@ export const DEFAULT_ITEM_POWER: Record<string, number> = {
   'Frost Shard': 12, // fagyasztó
   'Lightning Eye': 14, // lánc-villám
 
+  // --- Alternatív lőmód (Fázis B) ---
+  'Sulfur Beam': 18, // folyamatos sugár, a vonalon mindenkit talál (build-meghatározó)
+  'Hellfire Breath': 16, // kúp-AoE + burn + égő talaj (közeli = kockázat, ezért < sugár)
+  'Charged Shot': 15, // töltött burst (net-DPS paritás, koncentrált egy-lövéses sebzés)
+  'Signet Ring': 17, // utazó korong-AoE, single-target paritás (a tömeg-clear az előny, < sugár)
+
   // --- Kísérők (Wave 4) ---
   'Moonstone': 13, // keringő orb
   'Guardian Fly': 12, // lövedék-blokk

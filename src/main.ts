@@ -59,6 +59,12 @@ function init() {
   if (import.meta.env.DEV) {
     document.body.classList.add('dev');
     (window as unknown as { __sentex: unknown }).__sentex = { engine, game, world: game.world, dropConfig };
+    // Admin-felület LAZÁN, dev-only: production buildben (import.meta.env.DEV=false)
+    // ez az ág halott kód → a dinamikus import és vele a teljes `src/admin` kiesik a
+    // bundle-ből (tree-shake), és a publikus tükörből a mappa egyben kihagyható.
+    import('./admin/AdminController').then(({ AdminControllerImpl }) => {
+      game.registerAdmin(new AdminControllerImpl(game.adminHost()));
+    });
   }
 
   // Némítás kapcsoló (M)
