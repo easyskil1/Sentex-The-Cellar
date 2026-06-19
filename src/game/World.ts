@@ -5,8 +5,8 @@ import type { Input } from '../engine/Input';
 import type { IEnemy } from './entities/enemies/Enemy';
 import type { Rect, EnemyBullet, Dir, HazardKind, Obstacle } from './types';
 import { OBSTACLES } from './types';
-import { drawRock, drawTree, drawCrate, drawLuckRock, drawTerrainObstacle } from './level/obstacleRender';
-import { drawFloorTiles, drawDecorations, drawLuckFloor } from './level/floorRender';
+import { drawLuckRock, drawTerrainObstacle } from './level/obstacleRender';
+import { drawFloorTiles, drawDecorations, drawLuckSpinner } from './level/floorRender';
 
 import { Player } from './entities/Player';
 import { Tear } from './entities/Tear';
@@ -41,8 +41,9 @@ import {
 } from './level/gateRender';
 import { drawHubPortal, drawHubGlyph, drawHubTitle } from './level/hubRender';
 import { drawLabWalls, drawLabExit, drawLabFrame, drawLabOverlay } from './level/labyrinthRender';
-import { drawWalls, drawDoors, drawTrapdoor, drawWaterBody } from './level/roomRender';
+import { drawWalls, drawDoors, drawTrapdoor, drawWaterBody, vignetteGradient } from './level/roomRender';
 import { FloorCache } from './level/floorCache';
+import { PropCache, isAnimatedProp } from './level/propCache';
 import { drawProjectileGlow, drawDamageLabels } from './level/worldOverlays';
 import { MAP_ANIM_BY_CH } from './level/mapAnim';
 import { resolveLevel, CHAPTERS, chapterFloorRange, chapterName, chapterBossName, chapterBossQuote } from './level/levels';
@@ -279,6 +280,8 @@ export class World {
    */
   /** Statikus szoba-rétegek (padló + pocsolyák, vérfoltok) off-screen gyorsítótára. */
   private floors = new FloorCache();
+  /** Statikus pálya-tárgyak (kő/fa/láda/dísz) off-screen gyorsítótára. */
+  private props = new PropCache();
   /** Újrahasznosított ellenfél-iterációs puffer (a frame-enkénti spread helyett). */
   private readonly enemyScratch: IEnemy[] = [];
   /**
@@ -450,6 +453,7 @@ export class World {
     this.enemySlowT = 0;
     this.particles.clear();
     this.floors.invalidate();
+    this.props.invalidate();
   }
 
   /** A hub elhagyása (menübe lépéskor): a konténer-szoba eldobása, normál szoba vissza. */
@@ -458,6 +462,7 @@ export class World {
     this.hub = null;
     this.hubRoom = null;
     this.floors.invalidate();
+    this.props.invalidate();
     this.computeRoom();
   }
 
@@ -498,6 +503,7 @@ export class World {
     this.enemySlowT = 0;
     this.particles.clear();
     this.floors.invalidate(); // a maze-világ mérete eltér a szobáétól → újrasütés
+    this.props.invalidate();
 
     const TILE = ROOM.TILE;
     this.player.x = (lab.start.col + 0.5) * TILE;
@@ -547,6 +553,7 @@ export class World {
     this.labyrinth = null;
     this.labRoom = null;
     this.floors.invalidate();
+    this.props.invalidate();
     this.runStats.endLab();
     this.computeRoom();
   }
@@ -2388,12 +2395,9 @@ export class World {
     const W = ROOM.WALL;
     const th = this._theme;
 
-    // padló (gyorsítótárból) + szél-árnyalat
+    // padló (gyorsítótárból) + szél-árnyalat (memoizált gradiens)
     this.drawCachedFloor(ctx);
-    const g = ctx.createRadialGradient(this.cx, this.cy, rc.h * 0.2, this.cx, this.cy, rc.w * 0.7);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, `rgba(0,0,0,${th.vignette})`);
-    ctx.fillStyle = g;
+    ctx.fillStyle = vignetteGradient(ctx, this.cx, this.cy, rc, th.vignette);
     ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
 
     // falak (AJTÓK nélkül — a hub zárt terem)
@@ -2629,7 +2633,10 @@ export class World {
 
     if (this.currentRoom.type === 'item') {
       // SZERENCSE-SZOBA: tiszta, díszes padló — nincs kosz/repedés/dekoráció.
-      drawLuckFloor(ctx, rc, this.cx, this.cy, performance.now() / 1000);
+      // A statikus márvány+mandala gyorsítótárból (egy drawImage), csak a forgó
+      // belső csillag él — különben a teljes díszpadló frame-enként újrasült (FPS-feleződés).
+      this.floors.drawLuckFloor(ctx, rc, this.currentRoom, this.cx, this.cy, this.engine.pixelRatio);
+      drawLuckSpinner(ctx, this.cx, this.cy, Math.min(rc.w, rc.h) * 0.46, performance.now() / 1000);
     } else {
       // ---- procedurális kőpadló ----
       // A padló + pocsolyák statikusak a szobán belül → gyorsítótárból, egyetlen
@@ -2639,11 +2646,8 @@ export class World {
       this.drawCachedSplats(ctx);
       drawDecorations(ctx, this.currentRoom, th, (x, y) => this.isBlocked(x, y));
 
-      // szél-árnyalat
-      const g = ctx.createRadialGradient(this.cx, this.cy, rc.h * 0.2, this.cx, this.cy, rc.w * 0.7);
-      g.addColorStop(0, 'rgba(0,0,0,0)');
-      g.addColorStop(1, `rgba(0,0,0,${th.vignette})`);
-      ctx.fillStyle = g;
+      // szél-árnyalat (memoizált gradiens - szobánként állandó)
+      ctx.fillStyle = vignetteGradient(ctx, this.cx, this.cy, rc, th.vignette);
       ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
     }
 
@@ -2656,15 +2660,17 @@ export class World {
     // 1) víz a padlóra, EGY összefüggő folyótestként (az entitások alá kerül)
     const water = obs.filter((o) => o.kind === 'water');
     if (water.length) this.drawWater(ctx, water);
-    // 2) tárgyak (alapfajták külön, a TEREPTÁR a közös rajzolón át)
+    // 2) STATIKUS tárgyak: egyetlen gyorsítótárazott rétegként (egy drawImage).
+    //    A kő/fa/láda/dísz a szobán belül nem változik → fölösleges frame-enként
+    //    újrarajzolni (friss gradiensekkel). Lásd PropCache.
+    this.props.draw(ctx, this._room, this.currentRoom, this._theme, this.engine.pixelRatio, (c, r) => this.cellRect(c, r));
+    // 3) ANIMÁLT tárgyak élőben (fáklya/tűz/kristály/fű/indák… + luckrock); a víz
+    //    már megvolt fent, külön folyótestként.
     const t = performance.now() / 1000;
     for (const o of obs) {
+      if (o.kind === 'water' || !isAnimatedProp(o.kind)) continue;
       const r = this.cellRect(o.col, o.row);
-      if (o.kind === 'water') continue; // már megrajzoltuk
-      else if (o.kind === 'rock') drawRock(ctx, r, this._theme, o.col, o.row);
-      else if (o.kind === 'tree') drawTree(ctx, r, o.col, o.row);
-      else if (o.kind === 'crate') drawCrate(ctx, r, o.hp);
-      else if (o.kind === 'luckrock') drawLuckRock(ctx, r, o.col, o.row, t);
+      if (o.kind === 'luckrock') drawLuckRock(ctx, r, o.col, o.row, t);
       else drawTerrainObstacle(ctx, o.kind, r, this._theme, o.col, o.row, t);
     }
   }

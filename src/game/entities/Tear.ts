@@ -240,12 +240,10 @@ export class Tear {
     ctx.translate(this.x, this.y);
     ctx.rotate(ang);
     ctx.fillStyle = shade(this.color, 0.45); // világosabb test a telített magból
-    ctx.shadowColor = this.color;
-    ctx.shadowBlur = 10;
+    // (a lágy glow-haót a drawProjectileGlow additív rétege adja - nincs per-tear shadowBlur)
     ctx.beginPath();
     ctx.ellipse(0, 0, dr, ry, 0, 0, TAU);
     ctx.fill();
-    ctx.shadowBlur = 0;
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.beginPath();
     ctx.ellipse(-dr * 0.25, -ry * 0.4, dr * 0.4, ry * 0.4, 0, 0, TAU);

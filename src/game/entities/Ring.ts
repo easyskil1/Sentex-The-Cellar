@@ -110,13 +110,10 @@ export class Ring {
     // a pecsét-perem (vastag arany gyűrű ragyogással)
     ctx.lineWidth = RING.bandW;
     ctx.strokeStyle = this.color;
-    ctx.shadowColor = RING.glow;
-    ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.arc(0, 0, this.rad - RING.bandW * 0.5, 0, TAU);
     ctx.stroke();
     // bevésett rúnák: négy rövid sugárirányú rovátka a peremen
-    ctx.shadowBlur = 0;
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(60,40,12,0.8)';
     for (let i = 0; i < 4; i++) {

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow, aura, linear3 } from './helpers';
+import { lighten, darken, shadow, glow, aura, linear3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  HEALER — lebegő gyógyító-pap zöld életaurában, kereszt-amulettel;
@@ -19,8 +19,6 @@ export function drawHealer(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   if (v.active) {
     ctx.save();
     ctx.strokeStyle = '#8fffba';
-    ctx.shadowColor = '#5cff8f';
-    ctx.shadowBlur = 8;
     for (let i = 0; i < 2; i++) {
       const ph = (v.wob * 1.2 + i / 2) % 1;
       ctx.globalAlpha = 0.6 * (1 - ph);
@@ -90,8 +88,8 @@ export function drawHealer(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
 
   // gyógyító kereszt-amulett a mellkason (aktívkor ragyog)
   const cy = r * 0.28;
+  if (v.active) softGlow(ctx, 0, cy, r * 0.42, '#7cff9f');
   ctx.fillStyle = v.active ? '#eaffe8' : lighten(v.col, 0.35);
-  if (v.active) { ctx.shadowColor = '#7cff9f'; ctx.shadowBlur = 12; }
   ctx.strokeStyle = darken(v.col, 0.3);
   ctx.lineWidth = 1.4;
   const cw = r * 0.1, cl = r * 0.26;
@@ -101,7 +99,6 @@ export function drawHealer(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.beginPath();
   ctx.rect(-cl, cy - cw, cl * 2, cw * 2); // vízszintes szár
   ctx.fill(); ctx.stroke();
-  ctx.shadowBlur = 0;
 
   ctx.restore();
 }

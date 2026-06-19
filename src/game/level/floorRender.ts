@@ -451,7 +451,12 @@ export function drawDecorations(ctx: CanvasRenderingContext2D, room: Room, theme
  * szerencse-kerék mandalával a közép alatt. Tiszta (nincs kosz/repedés),
  * a fény középre húz — érződik, hogy itt a szerencse a főszereplő.
  */
-export function drawLuckFloor(ctx: CanvasRenderingContext2D, rc: Rect, cx: number, cy: number, t: number): void {
+/**
+ * A szerencse-padló STATIKUS rétege (márvány + csempe + fuga + mandala + fény).
+ * Nem függ az időtől → a `FloorCache` egyszer off-screen canvasra süti, majd
+ * frame-enként csak egy `drawImage`. A lassan forgó belső csillag a `drawLuckSpinner`.
+ */
+export function drawLuckFloor(ctx: CanvasRenderingContext2D, rc: Rect, cx: number, cy: number): void {
   ctx.save();
   ctx.beginPath();
   ctx.rect(rc.x, rc.y, rc.w, rc.h);
@@ -492,8 +497,8 @@ export function drawLuckFloor(ctx: CanvasRenderingContext2D, rc: Rect, cx: numbe
   for (let py = rc.y; py <= rc.y + rc.h; py += TS) { ctx.moveTo(rc.x, py); ctx.lineTo(rc.x + rc.w, py); }
   ctx.stroke();
 
-  // 3) szerencse-kerék mandala
-  drawFortuneMandala(ctx, cx, cy, Math.min(rc.w, rc.h) * 0.46, t);
+  // 3) szerencse-kerék mandala (statikus rész)
+  drawFortuneMandala(ctx, cx, cy, Math.min(rc.w, rc.h) * 0.46);
 
   // 4) meleg arany fény a közép felett + lágy szél-elsötétülés
   const warm = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.min(rc.w, rc.h) * 0.5);
@@ -512,8 +517,8 @@ export function drawLuckFloor(ctx: CanvasRenderingContext2D, rc: Rect, cx: numbe
   ctx.restore();
 }
 
-/** A padló közepére rajzolt arany szerencse-kerék (gyűrűk, küllők, szektorok, csillagok). */
-function drawFortuneMandala(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: number, t: number): void {
+/** A padló közepére rajzolt arany szerencse-kerék (gyűrűk, küllők, szektorok, csillagok). Statikus. */
+function drawFortuneMandala(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: number): void {
   ctx.save();
   ctx.translate(cx, cy);
 
@@ -564,9 +569,19 @@ function drawFortuneMandala(ctx: CanvasRenderingContext2D, cx: number, cy: numbe
     diamond(ctx, sx, sy, 5, 8);
   }
 
-  // lassan forgó belső csillám-csillag
+  ctx.restore();
+}
+
+/**
+ * A szerencse-kerék közepén lassan forgó csillám-csillag - az EGYETLEN animált
+ * elem a szerencse-padlón, ezért ezt rajzoljuk élőben (a többi cache-ből jön).
+ */
+export function drawLuckSpinner(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: number, t: number): void {
+  const r0 = R * 0.2;
+  ctx.save();
+  ctx.translate(cx, cy);
   ctx.rotate(t * 0.06);
-  ctx.strokeStyle = `${gold}0.3)`;
+  ctx.strokeStyle = 'rgba(214,176,92,0.3)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let i = 0; i < 8; i++) {
@@ -575,7 +590,6 @@ function drawFortuneMandala(ctx: CanvasRenderingContext2D, cx: number, cy: numbe
     ctx.lineTo(Math.cos(a) * r0 * 0.8, Math.sin(a) * r0 * 0.8);
   }
   ctx.stroke();
-
   ctx.restore();
 }
 

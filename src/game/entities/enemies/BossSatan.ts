@@ -2,6 +2,7 @@ import type { World } from '../../World';
 import type { IEnemy } from './Enemy';
 import { TAU, clamp } from '../../../engine/math';
 import { HP } from '../../config';
+import { softGlow } from './renderers/helpers';
 
 /** A Sátán-féle bossok teljes szín-palettája. */
 export interface SatanPalette {
@@ -300,9 +301,8 @@ export class BossSatan implements IEnemy {
     // dühös szemöldök + izzó szemek
     const ep = 0.7 + 0.3 * Math.sin(this.flame * 0.5);
     for (const s of [-1, 1]) {
+      softGlow(ctx, s * r * 0.18, hy + r * 0.06, r * 0.22 * ep, pal.eyeGlow);
       ctx.fillStyle = flash ? '#fff' : pal.eye;
-      ctx.shadowColor = pal.eyeGlow;
-      ctx.shadowBlur = 16 * ep;
       ctx.beginPath();
       ctx.moveTo(s * r * 0.08, hy - r * 0.02);
       ctx.lineTo(s * r * 0.32, hy + r * 0.04);
@@ -310,7 +310,6 @@ export class BossSatan implements IEnemy {
       ctx.closePath();
       ctx.fill();
     }
-    ctx.shadowBlur = 0;
     ctx.strokeStyle = pal.stroke;
     ctx.lineWidth = 3;
     for (const s of [-1, 1]) {

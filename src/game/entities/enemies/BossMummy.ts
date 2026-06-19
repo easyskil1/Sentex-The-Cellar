@@ -3,6 +3,7 @@ import type { IEnemy } from './Enemy';
 import type { HazardKind } from '../../types';
 import { TAU, clamp, rand } from '../../../engine/math';
 import { HP } from '../../config';
+import { softGlow } from './renderers/helpers';
 
 /** A Múmia-féle bossok teljes szín-palettája. */
 export interface MummyPalette {
@@ -316,14 +317,12 @@ export class BossMummy implements IEnemy {
     // izzó szemek a résből (pulzálva)
     const ep = 0.7 + Math.sin(this.bob * 2) * 0.3;
     for (const s of [-1, 1]) {
+      softGlow(ctx, s * r * 0.15, hy + r * 0.07, r * 0.16 * ep, pal.eyeGlow);
       ctx.fillStyle = flash ? '#fff' : pal.eye;
-      ctx.shadowColor = pal.eyeGlow;
-      ctx.shadowBlur = 13 * ep;
       ctx.beginPath();
       ctx.ellipse(s * r * 0.15, hy + r * 0.07, r * 0.07, r * 0.045, 0.08, 0, TAU);
       ctx.fill();
     }
-    ctx.shadowBlur = 0;
 
     // fej körvonal + egy laza, lelógó kötés-vég az áll mellett
     headPath();

@@ -1,4 +1,5 @@
 import { Boss2, type Boss2Palette } from './Boss2';
+import { softGlow } from './renderers/helpers';
 
 /** A lidérc mérge mérgező, savzöld palettája (a lila Lidérc helyett). */
 const POISON_PALETTE: Boss2Palette = {
@@ -39,8 +40,6 @@ export class Boss4 extends Boss2 {
   protected override drawAccents(ctx: CanvasRenderingContext2D, flash: boolean): void {
     ctx.save();
     ctx.fillStyle = flash ? '#ffffff' : POISON_PALETTE.orb;
-    ctx.shadowColor = POISON_PALETTE.glow;
-    ctx.shadowBlur = 8;
     const n = 6;
     const fall = 70; // a csepp esési útja, mielőtt eltűnik
     for (let i = 0; i < n; i++) {
@@ -48,6 +47,7 @@ export class Boss4 extends Boss2 {
       const drip = (this.wob * 26 + i * 41) % fall; // 0..fall ciklikus esés
       const dy = this.r * 0.45 + drip;
       ctx.globalAlpha = Math.max(0, 1 - drip / fall);
+      softGlow(ctx, bx, dy, 11, POISON_PALETTE.glow);
       // könnycsepp-alak: körív + felfelé futó hegy
       ctx.beginPath();
       ctx.moveTo(bx, dy - 7);

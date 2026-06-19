@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow, radial3 } from './helpers';
+import { lighten, darken, shadow, glow, radial3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  ENRAGER — felhergelő dühdémon, izzó erekkel; üvöltéskor (active)
@@ -70,7 +70,7 @@ export function drawEnrager(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
 
   // izzó düh-erek
   ctx.strokeStyle = v.active ? '#ff8a4a' : '#c0402a';
-  if (v.active) { ctx.shadowColor = '#ff4a2a'; ctx.shadowBlur = 8; }
+  if (v.active) softGlow(ctx, 0, 0, r * 0.7, '#ff4a2a');
   ctx.lineWidth = 1.8;
   for (const [sx, sy, mx, my, ex, ey] of [
     [-0.5, -0.1, -0.35, 0.2, -0.2, 0.5],
@@ -82,7 +82,6 @@ export function drawEnrager(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
     ctx.quadraticCurveTo(mx * r, my * r, ex * r, ey * r);
     ctx.stroke();
   }
-  ctx.shadowBlur = 0;
 
   // dühös, lefelé döntött szemöldök + izzó szemek
   const dx = Math.cos(look) * r * 0.08, dy = Math.sin(look) * r * 0.06;

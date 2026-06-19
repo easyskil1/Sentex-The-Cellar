@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, radial3 } from './helpers';
+import { lighten, darken, shadow, radial3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  LANCER — lila lebegő szentinel-szem, fókuszlencsével és energiasugárral
@@ -31,9 +31,7 @@ export function drawLancer(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
       ctx.stroke();
       ctx.setLineDash([]);
     } else {
-      // vastag izzó energiasugár
-      ctx.shadowColor = '#ff4ae0';
-      ctx.shadowBlur = 18;
+      // vastag izzó energiasugár (a háromrétegű stroke adja az izzást, shadowBlur nélkül)
       ctx.lineCap = 'round';
       ctx.strokeStyle = 'rgba(255,140,240,0.35)';
       ctx.lineWidth = 18;
@@ -44,7 +42,6 @@ export function drawLancer(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(v.x, v.y + float); ctx.lineTo(ex, ey); ctx.stroke();
-      ctx.shadowBlur = 0;
     }
     ctx.restore();
   }
@@ -110,13 +107,11 @@ export function drawLancer(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.arc(ex, ey, r * 0.14, 0, TAU);
   ctx.fill();
   if (glow > 0.3) {
+    softGlow(ctx, ex, ey, r * 0.22, '#ff6ae6');
     ctx.fillStyle = `rgba(255,200,250,${glow})`;
-    ctx.shadowColor = '#ff6ae6';
-    ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.arc(ex, ey, r * 0.07, 0, TAU);
     ctx.fill();
-    ctx.shadowBlur = 0;
   }
 
   ctx.restore();

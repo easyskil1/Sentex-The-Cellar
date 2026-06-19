@@ -174,16 +174,53 @@ export function shadow(ctx: CanvasRenderingContext2D, v: EnemyVisual, scale = 0.
   ctx.fill();
 }
 
-/** Izzó korong (neon pötty / torkolattűz / energiamag) — lágy fénykoszorúval. */
+/* ----------------------------------------------------------------- *
+ *  Izzó korong (neon pötty / torkolattűz / energiamag).
+ *
+ *  FORRÓ ÚT: korábban `shadowBlur`-rel rajzolt - ez a 2D-canvas LEGDRÁGÁBB
+ *  művelete (képkockánként, ellenfelenként 1-többször). Most szín szerint
+ *  GYORSÍTÓTÁRAZOTT, lágy korong-bélyegző adja a fénykoszorút (egy `drawImage`),
+ *  utána a tömör mag. Pixelben közeli, de shadowBlur nélkül - nagyságrenddel olcsóbb.
+ * ----------------------------------------------------------------- */
+const glowStamps = new Map<string, HTMLCanvasElement>();
+function glowStamp(col: string): HTMLCanvasElement {
+  let s = glowStamps.get(col);
+  if (s) return s;
+  const S = 64, r = S / 2;
+  s = document.createElement('canvas');
+  s.width = S; s.height = S;
+  const c = s.getContext('2d')!;
+  c.fillStyle = col;
+  c.fillRect(0, 0, S, S);
+  c.globalCompositeOperation = 'destination-in';
+  const g = c.createRadialGradient(r, r, 0, r, r, r);
+  g.addColorStop(0, 'rgba(255,255,255,0.85)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.35)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, S, S);
+  glowStamps.set(col, s);
+  return s;
+}
+
+/**
+ * Csak a lágy fénykoszorú (mag nélkül) - tetszőleges alakzat MÖGÉ, a `shadowBlur`
+ * kiváltására. A `rad` a koszorú sugara (kb. az alakzat mérete + a régi blur).
+ */
+export function softGlow(ctx: CanvasRenderingContext2D, x: number, y: number, rad: number, col: string): void {
+  ctx.drawImage(glowStamp(col), x - rad, y - rad, rad * 2, rad * 2);
+}
+
+/** Izzó korong (neon pötty / torkolattűz / energiamag) — lágy, cache-elt fénykoszorúval. */
 export function glow(ctx: CanvasRenderingContext2D, x: number, y: number, rr: number, col: string, blur: number): void {
-  ctx.save();
-  ctx.shadowColor = col;
-  ctx.shadowBlur = blur;
+  // lágy fénykoszorú a cache-elt bélyegzőből (a shadowBlur-t váltja ki)
+  const R = rr + blur;
+  ctx.drawImage(glowStamp(col), x - R, y - R, R * 2, R * 2);
+  // tömör mag
   ctx.fillStyle = col;
   ctx.beginPath();
   ctx.arc(x, y, rr, 0, TAU);
   ctx.fill();
-  ctx.restore();
 }
 
 /** Lágy, kifelé halványuló energiamező-korong (lassító/húzó/gyógyító aura). `rgb` = "r,g,b". */

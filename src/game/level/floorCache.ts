@@ -4,7 +4,8 @@
 // `drawImage`. Ez a render forró útjának fő tétele volt (~280 csempe/frame).
 // A két réteg külön kulcson sül újra; a World a szoba/labirintus-váltáskor
 // `invalidate()`-tel kényszeríti az újrasütést (a méret eltérhet).
-import { drawFloorTiles, drawPuddles, drawSplats } from './floorRender';
+import { drawFloorTiles, drawPuddles, drawSplats, drawLuckFloor } from './floorRender';
+import { bake } from './bakeLayer';
 import type { Rect } from '../types';
 import type { Room } from './Room';
 import type { Theme } from './theme';
@@ -16,10 +17,28 @@ export class FloorCache {
   private floorKey = '';
   private splat: HTMLCanvasElement | null = null;
   private splatKey = '';
+  private luck: HTMLCanvasElement | null = null;
+  private luckKey = '';
 
   /** A szoba/labirintus mérete eltérhet → a következő rajzolás újrasüti a padlót. */
   invalidate(): void {
     this.floor = null;
+    this.luck = null;
+  }
+
+  /**
+   * A szerencse-szoba STATIKUS padló-rétege gyorsítótárból (márvány + mandala +
+   * fény). A normál padlóval azonos minta: kulcs-változáskor egyszer off-screen
+   * canvasra sül, frame-enként csak egy `drawImage`. Az egyetlen animált elem
+   * (forgó belső csillag) a World-ben él, a `drawLuckSpinner`-rel.
+   */
+  drawLuckFloor(ctx: CanvasRenderingContext2D, rc: Rect, room: Room, cx: number, cy: number, dpr: number): void {
+    const key = `${room.gx},${room.gy}|${Math.round(rc.x)},${Math.round(rc.y)},${Math.round(rc.w)},${Math.round(rc.h)}|${dpr}`;
+    if (key !== this.luckKey || !this.luck) {
+      this.luck = bake(this.luck, rc, dpr, (cctx) => drawLuckFloor(cctx, rc, cx, cy));
+      this.luckKey = key;
+    }
+    if (this.luck) ctx.drawImage(this.luck, rc.x, rc.y, rc.w, rc.h);
   }
 
   /**
@@ -56,27 +75,4 @@ export class FloorCache {
     }
     if (this.splat) ctx.drawImage(this.splat, rc.x, rc.y, rc.w, rc.h);
   }
-}
-
-/**
- * Egy szoba-méretű off-screen réteg (újra)sütése: a meglévő canvast eszköz-pixel
- * élességűre méretezi, a világ-koordinátákat a (0,0)-ra tolja (a rajzolók abszolút
- * koordinátával dolgoznak), törli, majd lefuttatja a rajzoló callbacket.
- */
-function bake(
-  prev: HTMLCanvasElement | null,
-  rc: Rect,
-  dpr: number,
-  paint: (cctx: CanvasRenderingContext2D) => void,
-): HTMLCanvasElement | null {
-  const cw = Math.max(1, Math.round(rc.w * dpr));
-  const ch = Math.max(1, Math.round(rc.h * dpr));
-  const cv = prev ?? document.createElement('canvas');
-  if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
-  const cctx = cv.getContext('2d');
-  if (!cctx) return prev;
-  cctx.setTransform(dpr, 0, 0, dpr, -rc.x * dpr, -rc.y * dpr);
-  cctx.clearRect(rc.x, rc.y, rc.w, rc.h);
-  paint(cctx);
-  return cv;
 }

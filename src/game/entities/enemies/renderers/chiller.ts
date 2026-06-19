@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, radial2, radial3 } from './helpers';
+import { lighten, darken, shadow, radial2, radial3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  CHILLER — sápadt kék jégszellem, kristálytüskékkel és fagyos aurával
@@ -85,14 +85,12 @@ export function drawChiller(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   const dx = Math.cos(look) * r * 0.1;
   const dy = Math.sin(look) * r * 0.08;
   for (const sgn of [-1, 1]) {
+    softGlow(ctx, sgn * r * 0.28 + dx, -r * 0.08 + dy, r * 0.3, '#9fe0ec');
     ctx.fillStyle = '#dffaff';
-    ctx.shadowColor = '#9fe0ec';
-    ctx.shadowBlur = 8;
     ctx.beginPath();
     ctx.ellipse(sgn * r * 0.28 + dx, -r * 0.08 + dy, r * 0.12, r * 0.18, 0, 0, TAU);
     ctx.fill();
   }
-  ctx.shadowBlur = 0;
 
   // felső jégcsillanás
   ctx.fillStyle = 'rgba(255,255,255,0.55)';

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow, linear3 } from './helpers';
+import { lighten, darken, shadow, glow, linear3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  SUMMONER — lebegő csuklyás idéző, alatta forgó idéző-glifa-koronggal;
@@ -23,7 +23,7 @@ export function drawSummoner(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   ctx.rotate(v.wob * (v.active ? 1.4 : 0.5));
   ctx.globalAlpha = v.active ? 0.55 + Math.sin(v.wob * 8) * 0.2 : 0.3;
   ctx.strokeStyle = rune;
-  if (v.active) { ctx.shadowColor = '#9fc0ff'; ctx.shadowBlur = 12; }
+  if (v.active) softGlow(ctx, 0, 0, r * 1.4, '#9fc0ff');
   ctx.lineWidth = 2;
   for (const rad of [r * 1.25, r * 0.8]) {
     ctx.beginPath(); ctx.arc(0, 0, rad, 0, TAU); ctx.stroke();

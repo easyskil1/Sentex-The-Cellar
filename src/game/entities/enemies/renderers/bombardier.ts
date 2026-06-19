@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, linear3, radial2 } from './helpers';
+import { lighten, darken, shadow, linear3, radial2, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  BOMBARDIER — páncélos bogár-gólem, hátán ketyegő aknával
@@ -81,13 +81,11 @@ export function drawBombardier(ctx: CanvasRenderingContext2D, v: EnemyVisual): v
   ctx.quadraticCurveTo(r * 0.2, mineY - r * 0.7, r * 0.12, mineY - r * 0.85);
   ctx.stroke();
   const spark = v.active ? 1 : 0.4 + Math.sin(v.wob * 6) * 0.3;
+  softGlow(ctx, r * 0.12, mineY - r * 0.85, r * 0.09 * (0.7 + spark * 0.6) + 10 * spark, '#ff8a2a');
   ctx.fillStyle = `rgba(255,${120 + spark * 100},40,${spark})`;
-  ctx.shadowColor = '#ff8a2a';
-  ctx.shadowBlur = 10 * spark;
   ctx.beginPath();
   ctx.arc(r * 0.12, mineY - r * 0.85, r * 0.09 * (0.7 + spark * 0.6), 0, TAU);
   ctx.fill();
-  ctx.shadowBlur = 0;
 
   // gépi szem-szenzor
   const look = v.face;
@@ -96,13 +94,11 @@ export function drawBombardier(ctx: CanvasRenderingContext2D, v: EnemyVisual): v
   ctx.beginPath();
   ctx.ellipse(0, r * 0.18, r * 0.5, r * 0.18, 0, 0, TAU);
   ctx.fill();
+  softGlow(ctx, dx, r * 0.18, r * 0.16, '#ff3a1e');
   ctx.fillStyle = v.flash ? '#fff' : '#ff5a3a';
-  ctx.shadowColor = '#ff3a1e';
-  ctx.shadowBlur = 6;
   ctx.beginPath();
   ctx.arc(dx, r * 0.18, r * 0.08, 0, TAU);
   ctx.fill();
-  ctx.shadowBlur = 0;
 
   ctx.restore();
 }

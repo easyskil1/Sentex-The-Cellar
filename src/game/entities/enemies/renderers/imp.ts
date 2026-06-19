@@ -20,8 +20,6 @@ export function drawImp(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
     ctx.save();
     ctx.globalAlpha = 0.5 * mat;
     ctx.strokeStyle = '#ff8a4a';
-    ctx.shadowColor = '#ff6a2a';
-    ctx.shadowBlur = 10;
     ctx.lineWidth = 1.5;
     for (let i = 0; i < 3; i++) {
       ctx.beginPath();

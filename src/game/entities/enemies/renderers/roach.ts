@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, linear3 } from './helpers';
+import { lighten, darken, shadow, linear3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  ROACH — apró csótány: ovális tor, fejpajzs, csápok, cikázó lábak.
@@ -25,9 +25,8 @@ export function drawRoach(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   if (v.active) {
     ctx.save();
     ctx.globalAlpha = 0.35 + Math.sin(v.wob * 6) * 0.15;
+    softGlow(ctx, 0, 0, r * 1.7, '#ff3a1e');
     ctx.fillStyle = '#ff5a3a';
-    ctx.shadowColor = '#ff3a1e';
-    ctx.shadowBlur = 10;
     ctx.beginPath();
     ctx.ellipse(0, 0, r * 1.5, r * 1.05, 0, 0, TAU);
     ctx.fill();

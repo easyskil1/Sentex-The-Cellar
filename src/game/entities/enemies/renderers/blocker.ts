@@ -105,8 +105,6 @@ export function drawBlocker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   if (v.active) {
     ctx.globalAlpha = 0.4 + Math.sin(v.wob * 8) * 0.2;
     ctx.strokeStyle = '#aef0ff';
-    ctx.shadowColor = '#7fd0ff';
-    ctx.shadowBlur = 14;
     ctx.lineWidth = 3;
     ctx.stroke();
     // központi energiamag

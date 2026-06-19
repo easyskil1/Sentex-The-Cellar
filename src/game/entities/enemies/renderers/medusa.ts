@@ -19,8 +19,6 @@ export function drawMedusa(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
     ctx.save();
     ctx.globalAlpha = 0.25 + Math.sin(v.wob * 12) * 0.15;
     ctx.strokeStyle = '#dffae8';
-    ctx.shadowColor = '#bfe8cf';
-    ctx.shadowBlur = 8;
     ctx.lineWidth = 3;
     const cos = Math.cos(look), sin = Math.sin(look);
     ctx.beginPath();

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, radial3, radial2 } from './helpers';
+import { lighten, darken, shadow, radial3, radial2, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  SPIDER — pók (nagy és fióka egyaránt): tojás-potroh, fejtor, 8 ízelt láb,
@@ -19,9 +19,8 @@ export function drawSpider(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   if (v.active) {
     ctx.save();
     ctx.globalAlpha = 0.32 + Math.sin(v.wob * 6) * 0.14;
+    softGlow(ctx, v.x, v.y, r * 1.9, '#ff3a1e');
     ctx.fillStyle = '#ff5a3a';
-    ctx.shadowColor = '#ff3a1e';
-    ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.arc(v.x, v.y, r * 1.7, 0, TAU);
     ctx.fill();

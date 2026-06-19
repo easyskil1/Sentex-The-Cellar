@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, radial3 } from './helpers';
+import { lighten, darken, shadow, radial3, softGlow } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  SCARAB — fémkék-arany szkarabeusz: ovális kitin, fejpajzs, ízelt lábak.
@@ -113,14 +113,12 @@ export function drawScarab(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   // NYITOTT: pulzáló védő-csillám a test körül (jelzi, hogy a lövés lepattan)
   if (open) {
     ctx.globalAlpha = 0.45 + 0.3 * (0.5 + 0.5 * Math.sin(v.wob * 8));
+    softGlow(ctx, 0, 0, r * 1.3, '#9fd6ff');
     ctx.strokeStyle = '#bfe6ff';
-    ctx.shadowColor = '#9fd6ff';
-    ctx.shadowBlur = 10;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.ellipse(0, 0, r * 1.2, r * 1.12, 0, 0, TAU);
     ctx.stroke();
-    ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
   }
 

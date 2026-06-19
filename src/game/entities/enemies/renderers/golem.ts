@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow, linear3 } from './helpers';
+import { lighten, darken, shadow, glow, linear3, softGlow } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  GOLEM — agyag/kő-kolosszus tömbkarokkal és izzó maggal a mellkasban;
@@ -75,16 +75,14 @@ export function drawGolem(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
 
   // izzó repedés-mag a mellkasban
   const glowI = v.active ? 1 : 0.5 + Math.sin(v.wob * 2) * 0.2;
+  softGlow(ctx, 0, 0, r * 0.55, '#ff8a2a');
   ctx.strokeStyle = `rgba(255,${140 + glowI * 80},60,${0.6 + glowI * 0.4})`;
-  ctx.shadowColor = '#ff8a2a';
-  ctx.shadowBlur = 10 * glowI;
   ctx.lineWidth = 2.4;
   ctx.beginPath();
   ctx.moveTo(0, -r * 0.5); ctx.lineTo(-r * 0.15, -r * 0.1); ctx.lineTo(r * 0.12, r * 0.1); ctx.lineTo(-r * 0.05, r * 0.45);
   ctx.moveTo(-r * 0.15, -r * 0.1); ctx.lineTo(-r * 0.4, 0);
   ctx.moveTo(r * 0.12, r * 0.1); ctx.lineTo(r * 0.4, r * 0.05);
   ctx.stroke();
-  ctx.shadowBlur = 0;
   // izzó mag
   glow(ctx, 0, 0, r * 0.13 * glowI, '#ffb13a', 12 * glowI);
 

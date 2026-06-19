@@ -2,6 +2,8 @@
 // additív glow) és a teszt-aréna sebzés-feliratai. Tiszta függvények - a World
 // adja át az entitás-listákat és a szintet.
 import { drawGlow, withGlow } from './lightRender';
+import { styleOf } from '../entities/BulletRenderer';
+import { glowColorOf } from '../entities/bulletGfx';
 import { Enemy, type IEnemy } from '../entities/enemies/Enemy';
 import { scaleIncomingDamage } from '../balance/difficulty';
 import { HP } from '../config';
@@ -21,7 +23,9 @@ export function drawProjectileGlow(
   withGlow(ctx, () => {
     for (const t of tears) drawGlow(ctx, t.x, t.y, t.r * 3.4, t.color, 0.5 * pulse);
     for (const b of ebullets) {
-      const col = b.poison || b.slime ? '#bfff6a' : b.slow ? '#9fdf4a' : '#ff8a5a';
+      // stílus-szerinti glow-szín (a régi per-lövedék shadowBlur halóját váltja ki);
+      // a sötét (csont/kő) stílusnál nincs színes glow → semleges meleg halo marad
+      const col = glowColorOf(styleOf(b)) ?? (b.poison || b.slime ? '#bfff6a' : b.slow ? '#9fdf4a' : '#ff8a5a');
       drawGlow(ctx, b.x, b.y, (b.r + 4) * 2.6, col, 0.42 * pulse);
     }
     for (const bomb of bombs) drawGlow(ctx, bomb.x, bomb.y, 30, '#ff7b3a', 0.32 * pulse);

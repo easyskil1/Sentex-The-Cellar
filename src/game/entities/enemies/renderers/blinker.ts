@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, linear3 } from './helpers';
+import { lighten, darken, shadow, linear3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  BLINKER — fázis-szellem: rendesen áttetsző lila lidérc nagy szemmel;
@@ -21,8 +21,6 @@ export function drawBlinker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
     ctx.save();
     ctx.globalAlpha = 0.5;
     ctx.strokeStyle = '#c8a0ff';
-    ctx.shadowColor = '#b08aff';
-    ctx.shadowBlur = 10;
     ctx.lineWidth = 1.5;
     for (let i = 0; i < 3; i++) {
       const rr = r * (0.6 + i * 0.5) * (1.2 - mat);
@@ -74,13 +72,11 @@ export function drawBlinker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   // nagy ciklop-szem a játékos felé
   const look = v.face;
   const ex = Math.cos(look) * r * 0.18, ey = Math.sin(look) * r * 0.16;
+  softGlow(ctx, 0, -r * 0.3, r * 0.7, '#b08aff');
   ctx.fillStyle = '#fff';
-  ctx.shadowColor = '#b08aff';
-  ctx.shadowBlur = 10;
   ctx.beginPath();
   ctx.ellipse(0, -r * 0.3, r * 0.38, r * 0.44, 0, 0, TAU);
   ctx.fill();
-  ctx.shadowBlur = 0;
   ctx.fillStyle = darken(v.col, 0.05);
   ctx.beginPath();
   ctx.arc(ex, -r * 0.3 + ey, r * 0.2, 0, TAU);

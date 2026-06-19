@@ -7,6 +7,29 @@ import { TAU } from '../../engine/math';
 import type { Rect, Dir } from '../types';
 import type { Theme } from './theme';
 
+/* ------------------------------------------------------------------ *
+ *  Memoizált szél-árnyalat (vignetta). A gradiens a szobán belül állandó
+ *  (cx,cy,rc,vignetta), korábban mégis KÉPKOCKÁNKÉNT újraallokálódott. A
+ *  gradiens-koordináták a kitöltéskori transzformban értelmeződnek, így a
+ *  szobaváltás-csúsztatás (translate) alatt is jól mozog a vignetta.
+ * ------------------------------------------------------------------ */
+let vigGrad: CanvasGradient | null = null;
+let vigKey = '';
+let vigCtx: CanvasRenderingContext2D | null = null;
+
+/** A szoba szél-árnyalat gradiense, ctx- és kulcs-őrzött memoizálással. */
+export function vignetteGradient(ctx: CanvasRenderingContext2D, cx: number, cy: number, rc: Rect, vig: number): CanvasGradient {
+  const key = `${cx | 0},${cy | 0},${Math.round(rc.w)},${Math.round(rc.h)},${vig}`;
+  if (ctx !== vigCtx || key !== vigKey || !vigGrad) {
+    vigGrad = ctx.createRadialGradient(cx, cy, rc.h * 0.2, cx, cy, rc.w * 0.7);
+    vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vigGrad.addColorStop(1, `rgba(0,0,0,${vig})`);
+    vigKey = key;
+    vigCtx = ctx;
+  }
+  return vigGrad;
+}
+
 /** A szoba négy fala (perem + felső él-csík). */
 export function drawWalls(ctx: CanvasRenderingContext2D, rc: Rect, th: Theme): void {
   const W = ROOM.WALL;

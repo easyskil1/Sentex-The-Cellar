@@ -30,7 +30,7 @@ import { el, pageHeader, panel, table, toggleField, button, select, slider } fro
 export type OverlayAction =
   | 'start' | 'resume' | 'menu' | 'admin' | 'rank' | 'bestiary' | 'settings' | 'credits' | 'edit-name'
   | 'toggle-audio' | 'reset-progress' | 'narrator' | 'toggle-fps' | 'toggle-fullscreen' | 'toggle-gamefeel' | 'toggle-hitstop' | 'toggle-thicktears'
-  | 'rscale-100' | 'rscale-75' | 'rscale-50'
+  | 'rscale-auto' | 'rscale-100' | 'rscale-75' | 'rscale-50'
   | 'shadow-off' | 'shadow-hard' | 'shadow-soft'
   | 'admin-map' | 'admin-odds' | 'admin-enemy' | 'admin-boss' | 'admin-item' | 'admin-skill' | 'admin-balance' | 'admin-settings'
   | 'offer-accept' | 'offer-decline';
@@ -88,6 +88,8 @@ export interface SettingsView {
   fpsShown: boolean;
   /** Render-felbontás szorzó (1 / 0.75 / 0.5). */
   renderScale: number;
+  /** Automatikus minőség (adaptív render-skála) BE-e. */
+  autoQuality: boolean;
   /** Teljes képernyő aktív-e (a böngésző Fullscreen API állapota). */
   fullscreen: boolean;
   /** „Játékérzet"-effektek (csőtorkolat-villanás, visszarúgás, kamera-kick) BE-e. */
@@ -826,8 +828,9 @@ export class Overlays {
         el('small', { class: 'adm-field-help', text: t('set.resolution.help') }),
       ]),
       select({
-        value: String(Math.round(view.renderScale * 100)),
+        value: view.autoQuality ? 'auto' : String(Math.round(view.renderScale * 100)),
         options: [
+          { value: 'auto', label: t('set.resolution.auto') },
           { value: '100', label: '100%' },
           { value: '75', label: '75%' },
           { value: '50', label: '50%' },

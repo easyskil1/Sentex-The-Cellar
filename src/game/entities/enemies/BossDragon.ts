@@ -2,6 +2,7 @@ import type { World } from '../../World';
 import type { IEnemy } from './Enemy';
 import { TAU, clamp } from '../../../engine/math';
 import { HP } from '../../config';
+import { softGlow } from './renderers/helpers';
 
 /** A Sárkány-féle bossok teljes szín-palettája. */
 export interface DragonPalette {
@@ -457,13 +458,11 @@ export class BossDragon implements IEnemy {
       ctx.fill();
     }
     // szem
+    softGlow(ctx, r * 0.05, -r * 0.08, r * 0.18, pal.eyeGlow);
     ctx.fillStyle = flash ? '#fff' : pal.eye;
-    ctx.shadowColor = pal.eyeGlow;
-    ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.ellipse(r * 0.05, -r * 0.08, r * 0.09, r * 0.07, 0, 0, TAU);
     ctx.fill();
-    ctx.shadowBlur = 0;
     // pupilla (függőleges rés)
     ctx.fillStyle = pal.stroke;
     ctx.beginPath();

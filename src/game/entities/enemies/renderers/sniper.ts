@@ -22,8 +22,6 @@ export function drawSniper(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
     ctx.save();
     ctx.globalAlpha = 0.35 + Math.sin(v.wob * 16) * 0.25;
     ctx.strokeStyle = '#ff4a4a';
-    ctx.shadowColor = '#ff2a2a';
-    ctx.shadowBlur = 6;
     ctx.lineWidth = 1.4;
     ctx.beginPath();
     ctx.moveTo(muzzleX, muzzleY);

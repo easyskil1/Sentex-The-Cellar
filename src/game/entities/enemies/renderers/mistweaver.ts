@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, radial2, linear3 } from './helpers';
+import { lighten, radial2, linear3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  MISTWEAVER — kísértet-lidérc, rongyos lepelben, ködöt szövő kezekkel
@@ -73,14 +73,12 @@ export function drawMistweaver(ctx: CanvasRenderingContext2D, v: EnemyVisual): v
   const dx = Math.cos(look) * r * 0.08;
   const dy = Math.sin(look) * r * 0.06;
   for (const sgn of [-1, 1]) {
+    softGlow(ctx, sgn * r * 0.2 + dx, -r * 0.35 + dy, r * 0.28, '#b0a6e0');
     ctx.fillStyle = '#e8e2ff';
-    ctx.shadowColor = '#b0a6e0';
-    ctx.shadowBlur = 10;
     ctx.beginPath();
     ctx.ellipse(sgn * r * 0.2 + dx, -r * 0.35 + dy, r * 0.09, r * 0.15, 0, 0, TAU);
     ctx.fill();
   }
-  ctx.shadowBlur = 0;
 
   ctx.restore();
   ctx.globalAlpha = 1;

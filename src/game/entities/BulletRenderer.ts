@@ -8,9 +8,15 @@
  *      lövedék hosszúkásabb ÉS keskenyebb (csóva-érzet), a lassú gömbölyűbb.
  *   2) Az időfüggő effektek (vibrálás, lobogás, gyűrű-tágulás) egy lövedékenként
  *      stabil fázismagból dolgoznak (a kezdősebességből), hogy ne ugráljanak.
+ *
+ * Teljesítmény: a lövedékek NEM használnak `shadowBlur`-t (a 2D-canvas
+ * legdrágább művelete). A lágy glow-halót a már gyorsítótárazott, additív
+ * `drawProjectileGlow` réteg adja (stílus-szerinti színnel, lásd glowColorOf); a
+ * test-gradiensek pedig memoizáltak (lásd bulletGfx).
  */
 
 import { clamp, TAU, hash2 } from '../../engine/math';
+import { lin3, lin4 } from './bulletGfx';
 import type { EnemyBullet, BulletStyle } from '../types';
 
 /** A sebesség → nyúlás leképezés: ~150 px/s alatt gömb, fölötte egyre hosszabb. */
@@ -24,7 +30,7 @@ function phaseOf(b: EnemyBullet): number {
 }
 
 /** A tényleges stílus: explicit `style`, vagy a régi bool-kapcsolók, vagy `ember`. */
-function styleOf(b: EnemyBullet): BulletStyle {
+export function styleOf(b: EnemyBullet): BulletStyle {
   return b.style ?? (b.slime ? 'slime' : b.poison ? 'poison' : 'ember');
 }
 
@@ -64,17 +70,10 @@ function drawEmber(ctx: CanvasRenderingContext2D, b: EnemyBullet): void {
   const st = speedStretch(sp, 0.7);
   const rx = b.r * st;
   const ry = b.r / Math.sqrt(st); // gyorsabb → keskenyebb
-  ctx.shadowColor = '#ff3a1e';
-  ctx.shadowBlur = 10;
-  const g = ctx.createLinearGradient(-rx, 0, rx, 0);
-  g.addColorStop(0, '#c0341a');
-  g.addColorStop(0.55, '#ff6a4d');
-  g.addColorStop(1, '#ffd0a0');
-  ctx.fillStyle = g;
+  ctx.fillStyle = lin3(ctx, -rx, 0, rx, 0, 0.55, '#c0341a', '#ff6a4d', '#ffd0a0');
   ctx.beginPath();
   ctx.ellipse(0, 0, rx, ry, 0, 0, TAU);
   ctx.fill();
-  ctx.shadowBlur = 0;
   // forró mag-csillanás elöl
   ctx.fillStyle = 'rgba(255,236,200,0.8)';
   ctx.beginPath();
@@ -89,18 +88,10 @@ function drawEnergy(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): v
   const st = speedStretch(sp, 1.1);
   const rx = b.r * st;
   const ry = (b.r / Math.sqrt(st)) * (1 + Math.sin(t * 30 + phaseOf(b)) * 0.08);
-  ctx.shadowColor = '#5fd0ff';
-  ctx.shadowBlur = 12;
-  const g = ctx.createLinearGradient(-rx, 0, rx, 0);
-  g.addColorStop(0, 'rgba(40,120,200,0)');
-  g.addColorStop(0.4, '#3aa0e6');
-  g.addColorStop(0.8, '#9fe8ff');
-  g.addColorStop(1, '#ffffff');
-  ctx.fillStyle = g;
+  ctx.fillStyle = lin4(ctx, -rx, 0, rx, 0, 0.4, 0.8, 'rgba(40,120,200,0)', '#3aa0e6', '#9fe8ff', '#ffffff');
   ctx.beginPath();
   ctx.ellipse(0, 0, rx, ry, 0, 0, TAU);
   ctx.fill();
-  ctx.shadowBlur = 0;
   // izzó fehér mag a fejen
   ctx.fillStyle = 'rgba(240,252,255,0.95)';
   ctx.beginPath();
@@ -116,13 +107,10 @@ function drawPoison(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): v
   const st = speedStretch(sp, 0.45);
   const rx = b.r * st * pulse;
   const ry = (b.r / Math.sqrt(st)) * pulse;
-  ctx.shadowColor = '#6f9f2a';
-  ctx.shadowBlur = 10;
   ctx.fillStyle = '#a6e84a';
   ctx.beginPath();
   ctx.ellipse(0, 0, rx, ry, 0, 0, TAU);
   ctx.fill();
-  ctx.shadowBlur = 0;
   // savzöld csillanás + két apró buborék
   ctx.fillStyle = 'rgba(230,255,160,0.75)';
   ctx.beginPath();
@@ -151,20 +139,13 @@ function drawSlime(ctx: CanvasRenderingContext2D, b: EnemyBullet): void {
   }
 
   // fő nyálcsepp
-  ctx.shadowColor = '#6f9f2a';
-  ctx.shadowBlur = 8;
-  const g = ctx.createLinearGradient(tail, 0, head + R, 0);
-  g.addColorStop(0, '#5f8f24');
-  g.addColorStop(0.55, '#b6e04a');
-  g.addColorStop(1, '#dcff7a');
-  ctx.fillStyle = g;
+  ctx.fillStyle = lin3(ctx, tail, 0, head + R, 0, 0.55, '#5f8f24', '#b6e04a', '#dcff7a');
   ctx.beginPath();
   ctx.arc(head, 0, R, -Math.PI * 0.5, Math.PI * 0.5, false);
   ctx.quadraticCurveTo(tail * 0.45, R * 0.55, tail, 0);
   ctx.quadraticCurveTo(tail * 0.45, -R * 0.55, head, -R);
   ctx.closePath();
   ctx.fill();
-  ctx.shadowBlur = 0;
 
   // fényes csillanás a fejen
   ctx.fillStyle = 'rgba(235,255,170,0.75)';
@@ -182,8 +163,6 @@ function drawBone(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): voi
   const st = speedStretch(sp, 1.3);
   const len = b.r * st * 1.25;
   const wid = b.r * 0.62;
-  ctx.shadowColor = '#000';
-  ctx.shadowBlur = 4;
   ctx.fillStyle = '#efe9da';
   ctx.beginPath();
   ctx.moveTo(len, 0);
@@ -191,7 +170,6 @@ function drawBone(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): voi
   ctx.quadraticCurveTo(0, -wid, len, 0);
   ctx.closePath();
   ctx.fill();
-  ctx.shadowBlur = 0;
   // árnyékos gerinc
   ctx.strokeStyle = 'rgba(150,140,120,0.7)';
   ctx.lineWidth = Math.max(1, b.r * 0.16);
@@ -207,8 +185,6 @@ function drawStone(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): vo
   enter(ctx, b);
   ctx.rotate(t * 1.1 + phaseOf(b)); // lomhán pörög
   const seed = Math.floor(b.r * 7 + Math.abs(b.vx));
-  ctx.shadowColor = '#000';
-  ctx.shadowBlur = 5;
   ctx.fillStyle = '#8d877d';
   ctx.beginPath();
   const verts = 7;
@@ -221,7 +197,6 @@ function drawStone(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): vo
   }
   ctx.closePath();
   ctx.fill();
-  ctx.shadowBlur = 0;
   // felső megvilágítás + repedés
   ctx.fillStyle = 'rgba(200,194,184,0.5)';
   ctx.beginPath();
@@ -243,9 +218,7 @@ function drawArcane(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): v
   ctx.translate(b.x, b.y);
   const ph = phaseOf(b);
   const pulse = 1 + Math.sin(t * 9 + ph) * 0.12;
-  ctx.shadowColor = '#b06aff';
-  ctx.shadowBlur = 14;
-  // mag
+  // mag (a sugár lüktet → élő gradiens, de shadowBlur nélkül)
   const g = ctx.createRadialGradient(0, 0, b.r * 0.1, 0, 0, b.r * pulse);
   g.addColorStop(0, '#f0e0ff');
   g.addColorStop(0.5, '#c08aff');
@@ -254,7 +227,6 @@ function drawArcane(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): v
   ctx.beginPath();
   ctx.arc(0, 0, b.r * pulse, 0, TAU);
   ctx.fill();
-  ctx.shadowBlur = 0;
   // lüktető külső gyűrű
   ctx.strokeStyle = `rgba(200,150,255,${0.5 + Math.sin(t * 9 + ph) * 0.25})`;
   ctx.lineWidth = Math.max(1, b.r * 0.16);
@@ -278,8 +250,6 @@ function drawSonic(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): vo
   ctx.save();
   ctx.translate(b.x, b.y);
   const ph = phaseOf(b);
-  ctx.shadowColor = '#cfe0ff';
-  ctx.shadowBlur = 8;
   for (let i = 0; i < 3; i++) {
     const k = (Math.sin(t * 12 + ph + i * 1.4) + 1) * 0.5; // 0..1 lüktetés
     const rr = b.r * (0.6 + i * 0.45 + k * 0.25);
@@ -289,7 +259,6 @@ function drawSonic(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): vo
     ctx.arc(0, 0, rr, 0, TAU);
     ctx.stroke();
   }
-  ctx.shadowBlur = 0;
   // halvány mag
   ctx.fillStyle = 'rgba(225,235,255,0.5)';
   ctx.beginPath();
@@ -305,14 +274,8 @@ function drawFire(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): voi
   const flick = 1 + Math.sin(t * 22 + ph) * 0.12;
   const st = speedStretch(sp, 0.6);
   // hátranyúló lángcsóva
-  ctx.shadowColor = '#ff7a1e';
-  ctx.shadowBlur = 14;
   const tail = -b.r * (2.0 + st);
-  const gl = ctx.createLinearGradient(tail, 0, b.r, 0);
-  gl.addColorStop(0, 'rgba(200,40,10,0)');
-  gl.addColorStop(0.5, 'rgba(255,120,30,0.55)');
-  gl.addColorStop(1, 'rgba(255,200,80,0.8)');
-  ctx.fillStyle = gl;
+  ctx.fillStyle = lin3(ctx, tail, 0, b.r, 0, 0.5, 'rgba(200,40,10,0)', 'rgba(255,120,30,0.55)', 'rgba(255,200,80,0.8)');
   ctx.beginPath();
   ctx.moveTo(b.r * 0.6, 0);
   ctx.quadraticCurveTo(tail * 0.4, b.r * 0.85, tail, 0);
@@ -324,7 +287,6 @@ function drawFire(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): voi
   ctx.beginPath(); ctx.arc(0, 0, b.r * flick, 0, TAU); ctx.fill();
   ctx.fillStyle = '#ff8a2a';
   ctx.beginPath(); ctx.arc(b.r * 0.12, 0, b.r * 0.68 * flick, 0, TAU); ctx.fill();
-  ctx.shadowBlur = 0;
   ctx.fillStyle = '#ffe27a';
   ctx.beginPath(); ctx.arc(b.r * 0.2, 0, b.r * 0.34 * flick, 0, TAU); ctx.fill();
   ctx.restore();
@@ -334,13 +296,10 @@ function drawFire(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): voi
 function drawPellet(ctx: CanvasRenderingContext2D, b: EnemyBullet): void {
   const sp = enter(ctx, b);
   const st = speedStretch(sp, 0.5);
-  ctx.shadowColor = '#7a5a12';
-  ctx.shadowBlur = 5;
   ctx.fillStyle = '#e0a838';
   ctx.beginPath();
   ctx.ellipse(0, 0, b.r * st, b.r / Math.sqrt(st), 0, 0, TAU);
   ctx.fill();
-  ctx.shadowBlur = 0;
   ctx.fillStyle = 'rgba(255,240,190,0.8)';
   ctx.beginPath();
   ctx.arc(-b.r * 0.2, -b.r * 0.2, b.r * 0.3, 0, TAU);
@@ -355,20 +314,14 @@ function drawHeavy(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): vo
   const st = speedStretch(sp, 1.6);
   const tail = -b.r * (3.2 + st * 1.5);
   // hosszú fénycsóva
-  ctx.shadowColor = '#ff5a2a';
-  ctx.shadowBlur = 16;
-  const gl = ctx.createLinearGradient(tail, 0, b.r, 0);
-  gl.addColorStop(0, 'rgba(255,80,30,0)');
-  gl.addColorStop(0.7, 'rgba(255,120,40,0.6)');
-  gl.addColorStop(1, 'rgba(255,220,150,0.9)');
-  ctx.fillStyle = gl;
+  ctx.fillStyle = lin3(ctx, tail, 0, b.r, 0, 0.7, 'rgba(255,80,30,0)', 'rgba(255,120,40,0.6)', 'rgba(255,220,150,0.9)');
   ctx.beginPath();
   ctx.moveTo(b.r * 0.7, 0);
   ctx.quadraticCurveTo(tail * 0.4, b.r * 0.55, tail, 0);
   ctx.quadraticCurveTo(tail * 0.4, -b.r * 0.55, b.r * 0.7, 0);
   ctx.closePath();
   ctx.fill();
-  // izzó fej (pulzáló forró mag)
+  // izzó fej (pulzáló forró mag → élő gradiens, shadowBlur nélkül)
   const flick = 1 + Math.sin(t * 18 + ph) * 0.08;
   const g = ctx.createRadialGradient(b.r * 0.15, 0, b.r * 0.1, b.r * 0.15, 0, b.r * flick);
   g.addColorStop(0, '#fff4d8');
@@ -378,7 +331,6 @@ function drawHeavy(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): vo
   ctx.beginPath();
   ctx.arc(0, 0, b.r * flick, 0, TAU);
   ctx.fill();
-  ctx.shadowBlur = 0;
   ctx.restore();
 }
 
@@ -388,9 +340,9 @@ function drawGas(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): void
   ctx.save();
   ctx.translate(b.x, b.y);
   const ph = phaseOf(b);
-  ctx.shadowColor = '#9fdf4a';
-  ctx.shadowBlur = 12;
-  // több, kavargó lebernyeg a középpont körül → lüktető, lumpos felhő-sziluett
+  // több, kavargó lebernyeg a középpont körül → lüktető, lumpos felhő-sziluett.
+  // A lebernyegek pozíciója/sugara folyamatosan animál → élő gradiens (de a drága
+  // shadowBlur itt is kiesett; a glow-halót a drawProjectileGlow adja).
   const lobes = 5;
   for (let i = 0; i < lobes; i++) {
     const a = ph + t * 1.6 + (i / lobes) * TAU;
@@ -406,7 +358,6 @@ function drawGas(ctx: CanvasRenderingContext2D, b: EnemyBullet, t: number): void
     ctx.arc(ox, oy, rr, 0, TAU);
     ctx.fill();
   }
-  ctx.shadowBlur = 0;
   // sötét, beteges mag
   ctx.fillStyle = 'rgba(86,116,40,0.55)';
   ctx.beginPath();

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, radial3 } from './helpers';
+import { lighten, darken, shadow, radial3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  PYRO — narancs magma-szörny, izzó repedésekkel; közelről lángot okád
@@ -75,9 +75,8 @@ export function drawPyro(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   ctx.stroke();
 
   // izzó magma-repedések
+  softGlow(ctx, 0, 0, r * 0.85, '#ff7a1e');
   ctx.strokeStyle = v.flash ? '#fff' : '#ffd23a';
-  ctx.shadowColor = '#ff7a1e';
-  ctx.shadowBlur = 8;
   ctx.lineWidth = 2;
   for (const [sx, sy, ex2, ey2, mx, my] of [
     [-0.5, -0.2, -0.1, 0.5, -0.3, 0.15],
@@ -89,7 +88,6 @@ export function drawPyro(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
     ctx.quadraticCurveTo(mx * r, my * r, ex2 * r, ey2 * r);
     ctx.stroke();
   }
-  ctx.shadowBlur = 0;
 
   // dühös szemek
   const dx = Math.cos(look) * r * 0.08;
@@ -101,13 +99,11 @@ export function drawPyro(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   ctx.moveTo(r * 0.5, -r * 0.4); ctx.lineTo(r * 0.15, -r * 0.2);
   ctx.stroke();
   for (const sgn of [-1, 1]) {
+    softGlow(ctx, sgn * r * 0.3 + dx, -r * 0.08 + dy, r * 0.26, '#ffb13a');
     ctx.fillStyle = '#fff3b0';
-    ctx.shadowColor = '#ffb13a';
-    ctx.shadowBlur = 6;
     ctx.beginPath();
     ctx.arc(sgn * r * 0.3 + dx, -r * 0.08 + dy, r * 0.13, 0, TAU);
     ctx.fill();
-    ctx.shadowBlur = 0;
     ctx.fillStyle = '#7a1500';
     ctx.beginPath();
     ctx.arc(sgn * r * 0.3 + dx, -r * 0.08 + dy, r * 0.06, 0, TAU);

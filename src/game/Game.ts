@@ -17,7 +17,7 @@ import {
 } from './progression';
 import { loadStats, loadRecords, commitRun, resetAllStats } from './stats';
 import { resetBestiary } from './bestiary';
-import { loadMusicVolume, saveMusicVolume, loadSfxVolume, saveSfxVolume, loadBinds, saveBinds, loadFpsShown, saveFpsShown, loadRenderScale, saveRenderScale, saveFullscreenPref, loadGameFeel, saveGameFeel, loadHitStop, saveHitStop, loadThickTears, saveThickTears } from './settings';
+import { loadMusicVolume, saveMusicVolume, loadSfxVolume, saveSfxVolume, loadBinds, saveBinds, loadFpsShown, saveFpsShown, loadRenderScale, saveRenderScale, loadAutoQuality, saveAutoQuality, saveFullscreenPref, loadGameFeel, saveGameFeel, loadHitStop, saveHitStop, loadThickTears, saveThickTears } from './settings';
 import { DEFAULT_BINDS, type InputAction } from '../engine/Input';
 import { generateLabyrinth } from './level/labyrinth';
 import { CHAPTERS, resolveLevel, chapterName } from './level/levels';
@@ -233,14 +233,17 @@ export class Game implements EngineCallbacks {
       case 'shadow-soft':
         this.world.setShadowMode('soft');
         break;
+      case 'rscale-auto':
+        this.engine.setAutoQuality(true); saveAutoQuality(true);
+        break;
       case 'rscale-100':
-        this.engine.setRenderScale(1); saveRenderScale(1);
+        this.engine.setRenderScale(1); saveRenderScale(1); saveAutoQuality(false);
         break;
       case 'rscale-75':
-        this.engine.setRenderScale(0.75); saveRenderScale(0.75);
+        this.engine.setRenderScale(0.75); saveRenderScale(0.75); saveAutoQuality(false);
         break;
       case 'rscale-50':
-        this.engine.setRenderScale(0.5); saveRenderScale(0.5);
+        this.engine.setRenderScale(0.5); saveRenderScale(0.5); saveAutoQuality(false);
         break;
       case 'toggle-fullscreen':
         this.toggleFullscreen();
@@ -474,6 +477,7 @@ export class Game implements EngineCallbacks {
       binds: this.input.bindings(),
       fpsShown: loadFpsShown(),
       renderScale: loadRenderScale(),
+      autoQuality: loadAutoQuality(),
       fullscreen: !!document.fullscreenElement,
       gameFeel: loadGameFeel(),
       hitStop: loadHitStop(),

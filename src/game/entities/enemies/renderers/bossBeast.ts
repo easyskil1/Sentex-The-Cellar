@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow, radial2, radial4 } from './helpers';
+import { lighten, darken, shadow, glow, radial2, radial4, softGlow } from './helpers';
 
 /**
  * BOSS 1: A Fenevad — Az alap boss modernizált, rétegzelt renderelője.
@@ -72,15 +72,13 @@ export function drawBossBeast(ctx: CanvasRenderingContext2D, v: EnemyVisual): vo
   ctx.lineWidth = 5;
   
   if (!v.flash) {
-    ctx.shadowColor = angry ? '#ff0000' : '#ff4422';
-    ctx.shadowBlur = angry ? 35 : 20;
+    softGlow(ctx, 0, 0, r * (angry ? 1.7 : 1.45), angry ? '#ff0000' : '#ff4422');
   }
-  
+  ctx.fillStyle = bodyGrad;
   ctx.beginPath();
   ctx.ellipse(0, 0, r, r * pulse, 0, 0, TAU);
   ctx.fill();
   ctx.stroke();
-  ctx.shadowBlur = 0;
 
   // Élfény (Rim light)
   ctx.strokeStyle = 'rgba(255,255,255,0.15)';

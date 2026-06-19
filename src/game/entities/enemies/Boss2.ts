@@ -3,6 +3,7 @@ import type { IEnemy } from './Enemy';
 import { TAU, clamp, rand } from '../../../engine/math';
 import { TUNING } from '../../balance/tuning';
 import { HP } from '../../config';
+import { softGlow } from './renderers/helpers';
 
 export type Phase = 'move' | 'sweep' | 'garden' | 'spiral' | 'nova';
 
@@ -262,8 +263,6 @@ export class Boss2 implements IEnemy {
       const ex = this.x + ax * this.laserLen;
       const ey = this.y + float + ay * this.laserLen;
       ctx.save();
-      ctx.shadowColor = pal.glow;
-      ctx.shadowBlur = 20;
       ctx.lineCap = 'round';
       ctx.strokeStyle = pal.laserHalo;
       ctx.lineWidth = 22;
@@ -300,14 +299,12 @@ export class Boss2 implements IEnemy {
       const a = this.wob * 1.2 + (i / 3) * TAU;
       const ox = Math.cos(a) * this.r * 1.5;
       const oy = Math.sin(a) * this.r * 1.5 * 0.6;
+      softGlow(ctx, ox, oy, 16, pal.glow);
       ctx.fillStyle = pal.orb;
-      ctx.shadowColor = pal.glow;
-      ctx.shadowBlur = 12;
       ctx.beginPath();
       ctx.arc(ox, oy, 6, 0, TAU);
       ctx.fill();
     }
-    ctx.shadowBlur = 0;
 
     // rongyos lepel-test
     const g = ctx.createLinearGradient(0, -this.r, 0, this.r * 1.3);
@@ -354,21 +351,18 @@ export class Boss2 implements IEnemy {
       ctx.beginPath();
       ctx.ellipse(sgn * this.r * 0.17, -this.r * 0.34, this.r * 0.12, this.r * 0.15, 0, 0, TAU);
       ctx.fill();
+      softGlow(ctx, sgn * this.r * 0.17, -this.r * 0.34, this.r * 0.14, pal.glow);
       ctx.fillStyle = flash ? '#fff' : pal.eye;
-      ctx.shadowColor = pal.glow;
-      ctx.shadowBlur = 12;
       ctx.beginPath();
       ctx.arc(sgn * this.r * 0.17, -this.r * 0.34, this.r * 0.06, 0, TAU);
       ctx.fill();
     }
     // homlok-harmadik szem
+    softGlow(ctx, 0, -this.r * 0.55, this.r * 0.2, pal.thirdEyeGlow);
     ctx.fillStyle = flash ? '#fff' : pal.thirdEye;
-    ctx.shadowColor = pal.thirdEyeGlow;
-    ctx.shadowBlur = 14;
     ctx.beginPath();
     ctx.ellipse(0, -this.r * 0.55, this.r * 0.1, this.r * 0.14, 0, 0, TAU);
     ctx.fill();
-    ctx.shadowBlur = 0;
 
     // fog-vonal
     ctx.strokeStyle = pal.socket;

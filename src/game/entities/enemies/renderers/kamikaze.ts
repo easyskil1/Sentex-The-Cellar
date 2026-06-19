@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { parse, lighten, darken, shadow, glow, radial3 } from './helpers';
+import { parse, lighten, darken, shadow, glow, radial3, softGlow } from './helpers';
 
 /* ===================================================================== *
  *  KAMIKAZE — ketyegő élő bomba: gömbtest sercegő kanóccal, vészjósló
@@ -18,9 +18,8 @@ export function drawKamikaze(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   // vészjósló pír
   ctx.save();
   ctx.globalAlpha = 0.25 + blink * 0.25;
+  softGlow(ctx, v.x, v.y + float, r * 1.55, '#ff3a1e');
   ctx.fillStyle = '#ff5a2a';
-  ctx.shadowColor = '#ff3a1e';
-  ctx.shadowBlur = 14;
   ctx.beginPath();
   ctx.arc(v.x, v.y + float, r * 1.35, 0, TAU);
   ctx.fill();

@@ -100,6 +100,19 @@ export function saveRenderScale(v: number): void {
 }
 
 /**
+ * Automatikus minőség (adaptív render-skála): 60 FPS alatt finomít, és tartós
+ * fedezet esetén óvatosan visszaviszi maxra (racsnis, nem ugráló). Alap: KI -
+ * a kézi fix felbontás a stabil, kiszámítható alapélmény; ez OPT-IN.
+ */
+const AUTOQ_KEY = 'sentex_rscale_auto';
+export function loadAutoQuality(): boolean {
+  return localStorage.getItem(AUTOQ_KEY) === '1';
+}
+export function saveAutoQuality(v: boolean): void {
+  localStorage.setItem(AUTOQ_KEY, v ? '1' : '0');
+}
+
+/**
  * Teljes képernyő preferencia. Alapértelmezetten BE: a böngésző csak felhasználói
  * gesztusból enged fullscreent, ezért ezt az első kattintásnál/billentyűnél
  * alkalmazzuk (lásd main.ts). A Beállítások kapcsolója felülírja és megőrzi.

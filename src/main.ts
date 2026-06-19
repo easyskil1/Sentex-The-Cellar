@@ -7,7 +7,7 @@ import { Overlays } from './ui/Overlays';
 import { dropConfig } from './game/content/dropConfig';
 import { drawPlayer } from './game/entities/PlayerRenderer';
 import { FpsMeter } from './ui/FpsMeter';
-import { loadRenderScale, loadFullscreenPref } from './game/settings';
+import { loadRenderScale, loadAutoQuality, loadFullscreenPref } from './game/settings';
 import { initI18n } from './i18n';
 // Side-effect: a böngészőbe mentett pályákat betölti (helyben felülírja a MAPS-ot),
 // hogy a szerkesztett pályák a játékban is érvényesüljenek, ne csak az editorban.
@@ -94,7 +94,9 @@ function init() {
     drawMenuCharacter(eyeX, eyeY);
   });
 
-  engine.setRenderScale(loadRenderScale());   // mentett render-felbontás alkalmazása
+  // mentett render-beállítás: automatikus minőség, vagy fix felbontás-szorzó
+  if (loadAutoQuality()) engine.setAutoQuality(true);
+  else engine.setRenderScale(loadRenderScale());
   new FpsMeter(engine);   // valós FPS-kijelző (jobb lent), a Beállítások kapcsolja
 
   // Alapból teljes képernyő: a böngésző csak felhasználói gesztusból enged
