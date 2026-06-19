@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial3, radial2 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  SERPENT — tekergő kígyó pikkely-mintával, villás nyelvvel és méregfoggal;
@@ -29,10 +29,7 @@ export function drawSerpent(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
     const sx = -t * r * 1.5;
     const sy = Math.sin(v.wob * 3 + t * 5) * r * 0.4 * t;
     const sr = r * (0.7 - t * 0.18);
-    const seg = ctx.createRadialGradient(sx, sy - sr * 0.3, sr * 0.2, sx, sy, sr);
-    seg.addColorStop(0, light);
-    seg.addColorStop(0.6, body);
-    seg.addColorStop(1, darken(v.col, 0.3));
+    const seg = radial3(ctx, sx, sy - sr * 0.3, sr * 0.2, sx, sy, sr, 0.6, light, body, darken(v.col, 0.3));
     ctx.fillStyle = v.flash ? '#fff' : seg;
     ctx.strokeStyle = dark;
     ctx.lineWidth = 1.6;
@@ -48,9 +45,7 @@ export function drawSerpent(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // fej (ék alakú)
-  const hg = ctx.createRadialGradient(r * 0.3, -r * 0.1, r * 0.1, r * 0.2, 0, r * 0.7);
-  hg.addColorStop(0, light);
-  hg.addColorStop(1, body);
+  const hg = radial2(ctx, r * 0.3, -r * 0.1, r * 0.1, r * 0.2, 0, r * 0.7, light, body);
   ctx.fillStyle = v.flash ? '#fff' : hg;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2;

@@ -3,6 +3,7 @@ import type { PillShape, PillPattern, PillLook } from './Pill';
 import type { BodyLook } from '../entities/PlayerRenderer';
 import { shade, pick, weightedPick } from '../../engine/math';
 import { applyPerk, perkWeight } from './perkConfig';
+import { tc } from '../../i18n';
 
 /** Felvehető tárgy, amely tartósan módosítja a játékos statisztikáit. */
 export interface Item {
@@ -29,6 +30,17 @@ export interface Item {
    * alapot, a számlálók halmozódnak — így több tabletta egymásra épül.
    */
   mutateLook?: (look: BodyLook) => void;
+}
+
+/** A tárgy megjelenítendő neve a jelenlegi nyelven (az `item.name` az angol forrás
+ *  + a perk-azonosító; a HU-t a `CONTENT_HU` adja). */
+export function itemName(it: Item): string {
+  return tc(it.name, `item.${it.name}.name`);
+}
+
+/** A tárgy megjelenítendő leírása a jelenlegi nyelven. */
+export function itemDesc(it: Item): string {
+  return tc(it.desc, `item.${it.name}.desc`);
 }
 
 /** A tárgy tabletta-kinézete a rajzolóknak (a hiányzó mezőkre alapértelmezés). */

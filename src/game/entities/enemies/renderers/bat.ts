@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear2, radial2 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  BAT — óriásdenevér nagy bőrszárnyakkal és nagy fülekkel;
@@ -40,10 +40,7 @@ export function drawBat(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   // két nagy bőrszárny (csapkodnak)
   for (const sgn of [-1, 1]) {
     const lift = -flap * r * 0.3;
-    const wing = ctx.createLinearGradient(0, 0, sgn * r * 1.5, 0);
-    wing.addColorStop(0, v.flash ? '#fff' : body);
-    wing.addColorStop(1, v.flash ? '#fff' : darken(v.col, 0.4));
-    ctx.fillStyle = wing;
+    ctx.fillStyle = linear2(ctx, 0, 0, sgn * r * 1.5, 0, v.flash ? '#fff' : body, v.flash ? '#fff' : darken(v.col, 0.4));
     ctx.strokeStyle = dark;
     ctx.lineWidth = 1.6;
     ctx.beginPath();
@@ -69,10 +66,7 @@ export function drawBat(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   }
 
   // pici test
-  const g = ctx.createRadialGradient(-r * 0.1, -r * 0.2, r * 0.1, 0, 0, r * 0.55);
-  g.addColorStop(0, light);
-  g.addColorStop(1, body);
-  ctx.fillStyle = v.flash ? '#fff' : g;
+  ctx.fillStyle = v.flash ? '#fff' : radial2(ctx, -r * 0.1, -r * 0.2, r * 0.1, 0, 0, r * 0.55, light, body);
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2;
   ctx.beginPath();

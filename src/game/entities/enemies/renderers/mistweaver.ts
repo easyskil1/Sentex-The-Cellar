@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten } from './helpers';
+import { lighten, radial2, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  MISTWEAVER — kísértet-lidérc, rongyos lepelben, ködöt szövő kezekkel
@@ -15,9 +15,7 @@ export function drawMistweaver(ctx: CanvasRenderingContext2D, v: EnemyVisual): v
   // halvány köd-glória maga körül
   ctx.save();
   ctx.globalAlpha = 0.15 + (v.active ? 0.12 : 0) + Math.sin(v.wob * 2) * 0.04;
-  const halo = ctx.createRadialGradient(v.x, v.y + float, r * 0.4, v.x, v.y + float, r * 2.4);
-  halo.addColorStop(0, '#cfc8ee');
-  halo.addColorStop(1, 'rgba(176,166,224,0)');
+  const halo = radial2(ctx, v.x, v.y + float, r * 0.4, v.x, v.y + float, r * 2.4, '#cfc8ee', 'rgba(176,166,224,0)');
   ctx.fillStyle = halo;
   ctx.beginPath();
   ctx.arc(v.x, v.y + float, r * 2.4, 0, TAU);
@@ -32,10 +30,7 @@ export function drawMistweaver(ctx: CanvasRenderingContext2D, v: EnemyVisual): v
 
   // rongyos, alul szétfoszló lepel
   const tatters = 7;
-  const g = ctx.createLinearGradient(0, -r, 0, r * 1.4);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, 'rgba(34,29,58,0)');
+  const g = linear3(ctx, 0, -r, 0, r * 1.4, 0.6, light, body, 'rgba(34,29,58,0)');
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 1.6;

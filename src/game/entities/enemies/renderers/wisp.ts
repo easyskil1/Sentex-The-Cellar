@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { glow } from './helpers';
+import { glow, radial2, radial3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  WISP — lidércfény: izzó tűzmag lobogó lángnyelvekkel, halvány arccal.
@@ -13,9 +13,7 @@ export function drawWisp(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   // talaj-fényfolt
   ctx.save();
   ctx.globalAlpha = 0.35;
-  const gl = ctx.createRadialGradient(v.x, v.y + r * 0.8, 1, v.x, v.y + r * 0.8, r * 1.4);
-  gl.addColorStop(0, 'rgba(255,180,74,0.5)');
-  gl.addColorStop(1, 'rgba(255,120,40,0)');
+  const gl = radial2(ctx, v.x, v.y + r * 0.8, 1, v.x, v.y + r * 0.8, r * 1.4, 'rgba(255,180,74,0.5)', 'rgba(255,120,40,0)');
   ctx.fillStyle = gl;
   ctx.beginPath();
   ctx.ellipse(v.x, v.y + r * 0.8, r * 1.4, r * 0.5, 0, 0, TAU);
@@ -42,10 +40,7 @@ export function drawWisp(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   ctx.globalAlpha = 1;
 
   // izzó mag
-  const core = ctx.createRadialGradient(0, -r * 0.2, r * 0.05, 0, -r * 0.2, r * 0.6);
-  core.addColorStop(0, '#ffffe0');
-  core.addColorStop(0.5, '#ffd27a');
-  core.addColorStop(1, '#ff7a1e');
+  const core = radial3(ctx, 0, -r * 0.2, r * 0.05, 0, -r * 0.2, r * 0.6, 0.5, '#ffffe0', '#ffd27a', '#ff7a1e');
   ctx.fillStyle = v.flash ? '#fff' : core;
   glow(ctx, 0, -r * 0.2, r * 0.42 * flick, '#ffb13a', 16);
   ctx.beginPath();

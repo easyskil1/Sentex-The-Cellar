@@ -15,4 +15,10 @@ export interface Theme {
   bossColor: string;
   accent: string;
   decorations?: string[]; // Választható színek a fűnek, virágoknak stb.
+  /**
+   * Fejezet-szintű, „légköri" alap-animáció azonosítója (a MAP_ANIM `ch`-ja,
+   * lásd mapAnim.ts). Minden szoba megkapja, ha a sablon nem ad saját anim-jelet.
+   * `undefined` = nincs. Finom, hangulati effekt (köd/spóra/parázs), ne harci zaj.
+   */
+  ambient?: string;
 }

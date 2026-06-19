@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear3, linear2 } from './helpers';
 
 /* ===================================================================== *
  *  BLOCKER — nehéz páncélos őr nagy energiapajzzsal; blokkoláskor
@@ -32,10 +32,7 @@ export function drawBlocker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // test (vaskos páncél)
-  const g = ctx.createLinearGradient(0, -r, 0, r * 0.9);
-  g.addColorStop(0, light);
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, darken(v.col, 0.3));
+  const g = linear3(ctx, 0, -r, 0, r * 0.9, 0.5, light, body, darken(v.col, 0.3));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;
@@ -84,9 +81,7 @@ export function drawBlocker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   ctx.rotate(look + Math.PI / 2);
   const shScale = v.active ? 1.18 : 0.96;
   // pajzs-lemez
-  const sh = ctx.createLinearGradient(0, -r * shScale, 0, r * shScale);
-  sh.addColorStop(0, lighten(v.col, 0.3));
-  sh.addColorStop(1, darken(v.col, 0.4));
+  const sh = linear2(ctx, 0, -r * shScale, 0, r * shScale, lighten(v.col, 0.3), darken(v.col, 0.4));
   ctx.fillStyle = v.flash ? '#fff' : sh;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;

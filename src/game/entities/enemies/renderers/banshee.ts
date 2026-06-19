@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, glow, aura } from './helpers';
+import { lighten, glow, aura, linear3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  BANSHEE — sirató kísértet hosszú hajjal, alul elfoszló; sikolykor
@@ -38,10 +38,7 @@ export function drawBanshee(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   ctx.lineCap = 'round';
 
   // hosszú, lobogó haj + alul foszló test
-  const g = ctx.createLinearGradient(0, -r, 0, r * 1.4);
-  g.addColorStop(0, light);
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, 'rgba(32,48,58,0)');
+  const g = linear3(ctx, 0, -r, 0, r * 1.4, 0.5, light, body, 'rgba(32,48,58,0)');
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 1.6;

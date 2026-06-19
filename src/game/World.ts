@@ -1,3 +1,4 @@
+import { t as tr } from '../i18n';
 import type { Engine } from '../engine/Engine';
 import type { AudioManager } from '../engine/Audio';
 import type { Input } from '../engine/Input';
@@ -5,7 +6,7 @@ import type { IEnemy } from './entities/enemies/Enemy';
 import type { Rect, EnemyBullet, Dir, HazardKind, Obstacle } from './types';
 import { OBSTACLES } from './types';
 import { drawRock, drawTree, drawCrate, drawLuckRock, drawTerrainObstacle } from './level/obstacleRender';
-import { drawFloorTiles, drawPuddles, drawSplats, drawDecorations, drawLuckFloor } from './level/floorRender';
+import { drawFloorTiles, drawDecorations, drawLuckFloor } from './level/floorRender';
 
 import { Player } from './entities/Player';
 import { Tear } from './entities/Tear';
@@ -17,7 +18,7 @@ import { CHAMPION_TRAITS, ENEMY_STATS, type EnemyKind, type ChampionTrait } from
 import { Pickup, type PickupType } from './entities/Pickup';
 import { Shop, offerView, type ShopStall } from './entities/Shop';
 import { Pedestal } from './entities/Pedestal';
-import { rollItem, type Item } from './content/items';
+import { rollItem, itemName, itemDesc, type Item } from './content/items';
 import { rollGamble, GAMBLE_COST, rerollPrice } from './content/shopPricing';
 import { Dungeon } from './level/Dungeon';
 import { Room } from './level/Room';
@@ -29,7 +30,7 @@ import { EntityManager } from './systems/EntityManager';
 import { LightingSystem } from './systems/LightingSystem';
 import { computeVisibility, type Seg } from './systems/visibility';
 import { buildOccluder, type OccluderShape } from './systems/occluder';
-import { loadShadowMode, saveShadowMode, saveShake, type ShadowMode } from './settings';
+import { loadShadowMode, saveShadowMode, saveShake, loadHitStop, type ShadowMode } from './settings';
 import { ROOM, GRID, PLAYER_BASE, HP, LAB_TIMER } from './config';
 import { TAU, rand, clamp, dist2, pick } from '../engine/math';
 import { parseTemplate, type BossKind } from './level/roomTemplates';
@@ -39,11 +40,14 @@ import {
 } from './level/gateRender';
 import { drawHubPortal, drawHubGlyph, drawHubTitle } from './level/hubRender';
 import { drawLabWalls, drawLabExit, drawLabFrame, drawLabOverlay } from './level/labyrinthRender';
-import { drawGlow, withGlow } from './level/lightRender';
-import { resolveLevel, CHAPTERS, chapterFloorRange } from './level/levels';
+import { drawWalls, drawDoors, drawTrapdoor, drawWaterBody } from './level/roomRender';
+import { FloorCache } from './level/floorCache';
+import { drawProjectileGlow, drawDamageLabels } from './level/worldOverlays';
+import { MAP_ANIM_BY_CH } from './level/mapAnim';
+import { resolveLevel, CHAPTERS, chapterFloorRange, chapterName, chapterBossName } from './level/levels';
 import { enemyScale, scaleIncomingDamage, enemyDamageMul, NO_SCALE, type EnemyScale } from './balance/difficulty';
 import { TUNING } from './balance/tuning';
-import { SKILL_BY_ID } from './content/skills';
+import { SKILL_BY_ID, skillName, skillDesc } from './content/skills';
 import { Bomb, type BombType } from './entities/Bomb';
 import { dropConfig, roomDropChance, netSum } from './content/dropConfig';
 import type { Theme } from './level/theme';
@@ -70,6 +74,13 @@ export interface WorldCallbacks {
 
 /** A játékost ért sebzés hang-kategóriája (forrás szerint). */
 export type HurtSound = 'hurt' | 'acid' | 'burn' | 'zap';
+
+/**
+ * A padló-foltok (vérfoltok) felső korlátja szobánként. Hosszú harcban (sok
+ * ellenfél, summoner, pók-fiókák) különben korlátlanul nőne a tömb + a bake-méret.
+ * ~96 folt vizuálisan telíti a padlót, a vágás (legrégebbi eldobása) nem feltűnő.
+ */
+const MAX_SPLATS = 96;
 
 /** A hub-terem (mód-választó) négy portálja. */
 export type HubChoice = 'story' | 'dungeon' | 'labyrinth' | 'boss';
@@ -119,6 +130,8 @@ export class World {
   private pendingGambleItem: Item | null = null;
   /** Igaz, ha épp egy puszta értesítő ablak van nyitva (pl. „Nem nyertél"). */
   private pendingNotice = false;
+  /** Igaz, ha a labirintus-jutalom kártyája van nyitva → a RENDBEN/ESC kilép a labirintusból. */
+  private pendingLabExit = false;
   /** Röpke entitások (könnyek / ellenfél-lövedékek / bombák) birtokosa; a World gettereken át delegál. */
   private readonly entities = new EntityManager();
   /** A játékos könnyei — az EntityManager listája (a hívási helyek változatlanok). */
@@ -189,7 +202,13 @@ export class World {
     try { localStorage.setItem(CHEATS_KEY, JSON.stringify(this._cheats)); } catch { /* nem elérhető */ }
   }
 
-  private transition = 0;
+  // Szobaváltás-csúsztatás: a régi szobáról az `enterRoom` pillanatában készült
+  // canvas-pillanatkép a mozgásirányba kicsúszik, az új beúszik mellé. A snapshot
+  // a canvas éles (DPR-es) felbontásán él, hogy ne legyen életlen.
+  private slideP = 1;                 // 0→1 előrehaladás (1 = kész, nincs csúszás)
+  private slideDir: Dir | null = null;
+  private slideSnap: HTMLCanvasElement | null = null;
+  private static readonly SLIDE_DUR = 0.32;
   private enemySlowT = 0;
   /** Kísérők (familiar) közös fázis-órája — a keringő orbok szögéhez. */
   private familiarT = 0;
@@ -220,7 +239,12 @@ export class World {
   /** A pálya-doboz a képernyőn (a normál szobáéval AZONOS méret) — a kamera ezen belül görget. */
   private readonly labBox: Rect = { x: 0, y: 0, w: 0, h: 0 };
   private labWon = false;
-  private labWinTimer = 0;
+  /** Boss-intro (gótikus névtábla): a megjelenítendő név + hátralévő idő (mp). */
+  private bossIntro: { name: string; t: number } | null = null;
+  /** Hit-stop („sleep"): hátralévő fagyasztás (mp); >0 alatt a játékmenet áll. */
+  private hitStop = 0;
+  /** Hit-stop kapcsoló (Beállítások · Grafika); kikapcsolva sosem fagy. */
+  private hitStopEnabled = loadHitStop();
   /** Visszaszámláló: a teljes időkeret (mp) és a hátralévő idő (mp). 0-ra érve a futás véget ér. */
   private labTimeLimit = 0;
   private labTimeLeft = 0;
@@ -249,11 +273,8 @@ export class World {
    * elég egyszer egy off-screen canvasra rajzolni, és frame-enként egyetlen
    * `drawImage`-dzsel kitenni. A kulcs változására (szoba/méret/téma) újrasül.
    */
-  private floorCache: HTMLCanvasElement | null = null;
-  private floorCacheKey = '';
-  /** Maradandó vérfoltok rétege (a floorCache mintájára) — csak változáskor sül újra. */
-  private splatCache: HTMLCanvasElement | null = null;
-  private splatCacheKey = '';
+  /** Statikus szoba-rétegek (padló + pocsolyák, vérfoltok) off-screen gyorsítótára. */
+  private floors = new FloorCache();
   /** Újrahasznosított ellenfél-iterációs puffer (a frame-enkénti spread helyett). */
   private readonly enemyScratch: IEnemy[] = [];
   /**
@@ -298,6 +319,25 @@ export class World {
   addFloater(x: number, y: number, text: string, color = '#f3e2bf'): void {
     this.fx.addFloater(x, y, text, color);
   }
+  /** „Játékérzet"-effektek (csőtorkolat-villanás, visszarúgás, kamera-kick) BE-e. */
+  get gameFeel(): boolean { return this.fx.gameFeel; }
+  /** Game-feel kapcsoló élő frissítése (a Beállítások hívja). */
+  setGameFeel(v: boolean): void { this.fx.setGameFeel(v); }
+  /** Kamera-kick (a Player.shoot hívja); a facade-on át, mert az `fx` privát. */
+  addKick(dirX: number, dirY: number, amount: number): void { this.fx.addKick(dirX, dirY, amount); }
+  /** Hit-stop be/ki (Beállítások); kikapcsoláskor a futó fagyasztás is feloldódik. */
+  setHitStop(v: boolean): void { this.hitStopEnabled = v; if (!v) this.hitStop = 0; }
+  /** A futó boss-intro állapota a HUD-nak (`null`, ha nincs), vagy `{name, t}`. */
+  get bossIntroView(): { name: string; t: number } | null { return this.bossIntro; }
+  /**
+   * Hit-stop kiváltása: rövid, pár frame-es fagyasztás egy ütős pillanatban (ölés,
+   * sérülés). Halmozás helyett a leghosszabbat tartja, és felülről korlátozott,
+   * hogy sűrű ölésnél se akadjon be. Csak ha a kapcsoló BE van.
+   */
+  triggerHitStop(sec: number): void {
+    if (!this.hitStopEnabled) return;
+    this.hitStop = Math.min(0.09, Math.max(this.hitStop, sec));
+  }
 
   /**
    * Lebegő SEBZÉSSZÁM — harci visszajelzés a találatokról. Felpattan, kissé
@@ -325,7 +365,7 @@ export class World {
   get theme(): Theme { return this._theme; }
   floorName(): string {
     const lvl = resolveLevel(this.floor);
-    return `${lvl.chapter.name} ${lvl.index}`;
+    return `${chapterName(lvl.chapter)} ${lvl.index}`;
   }
 
   // ---- Életciklus ----
@@ -389,7 +429,7 @@ export class World {
     this.trapdoor = null;
     this.enemySlowT = 0;
     this.particles.clear();
-    this.floorCache = null;
+    this.floors.invalidate();
   }
 
   /** A hub elhagyása (menübe lépéskor): a konténer-szoba eldobása, normál szoba vissza. */
@@ -397,7 +437,7 @@ export class World {
     if (!this.hub) return;
     this.hub = null;
     this.hubRoom = null;
-    this.floorCache = null;
+    this.floors.invalidate();
     this.computeRoom();
   }
 
@@ -416,7 +456,7 @@ export class World {
     this._theme = theme;
     // a nehézség a MEGLÉVŐ szintből jön (world-kapu: aktuális szint; admin-teszt: 1)
     this.labWon = false;
-    this.labWinTimer = 0;
+    this.pendingLabExit = false;
     // Visszaszámláló: a legrövidebb út (pathLen tile) egyenes-séta-ideje, reális
     // tempó-szorzóval (kanyarok/harc) + ráhagyás. Így minden generált labirintus a
     // saját méretéhez kap időkeretet (lásd LAB_TIMER).
@@ -437,7 +477,7 @@ export class World {
     this.trapdoor = null;
     this.enemySlowT = 0;
     this.particles.clear();
-    this.floorCache = null; // a maze-világ mérete eltér a szobáétól → újrasütés
+    this.floors.invalidate(); // a maze-világ mérete eltér a szobáétól → újrasütés
 
     const TILE = ROOM.TILE;
     this.player.x = (lab.start.col + 0.5) * TILE;
@@ -486,7 +526,7 @@ export class World {
   private clearLabyrinthState(): void {
     this.labyrinth = null;
     this.labRoom = null;
-    this.floorCache = null;
+    this.floors.invalidate();
     this.runStats.endLab();
     this.computeRoom();
   }
@@ -602,6 +642,7 @@ export class World {
       room.enemies.push(this.makeBoss(c.x, c.y, at.kind));
       this.audio.boss();
       this.addShake(10);
+      this.bossIntro = { name: chapterBossName(chapter), t: 2.4 }; // az előnézet is mutassa az introt
     } else {
       const scale = enemyScale(this.floor, this.player);
       for (const sp of parsed.spawns) {
@@ -650,7 +691,7 @@ export class World {
       // Túlnyomórészt stat-perk (esély-súlyozva), ritkán skill-tárgy.
       const freeItem = rollItem();
       room.pedestal = new Pedestal(this.cx, this.cy - 188, freeItem);
-      room.pedestal.label = `FREE · ${freeItem.name}`;
+      room.pedestal.label = tr('fx.free', { name: itemName(freeItem) });
       room.shop = new Shop(this.cx, this.cy);
       return;
     }
@@ -683,6 +724,7 @@ export class World {
       room.enemies.push(this.makeBoss(c.x, c.y, at.kind));
       this.audio.boss();
       this.addShake(12);
+      this.bossIntro = { name: chapterBossName(chapter), t: 2.4 }; // gótikus névtábla (#60/Ú4)
       return;
     }
 
@@ -755,10 +797,32 @@ export class World {
     }
     // az új szoba rácsa azonnal a megfelelő állásban (kipucolt → nyitva, harci → zárva)
     this.doorT = next.cleared ? 1 : 0;
-    this.transition = 0.2;
+    this.startRoomSlide(dir);
     // 0.7 másodperc türelmi idő: az ellenfelek csak ezután indulnak el
     this.enemyFreezeT = next.cleared ? 0 : 0.7;
     this.audio.door();
+  }
+
+  /**
+   * Szobaváltás-csúsztatás indítása: pillanatkép a (még a régi szobát mutató)
+   * canvasról, majd a render `slideP`-vel a régit kicsúsztatja, az újat beúsztatja.
+   * A snapshot a canvas éles felbontásán készül, hogy ne legyen életlen.
+   */
+  private startRoomSlide(dir: Dir): void {
+    const src = this.engine.canvas;
+    let snap = this.slideSnap;
+    if (!snap) { snap = document.createElement('canvas'); this.slideSnap = snap; }
+    if (snap.width !== src.width || snap.height !== src.height) {
+      snap.width = src.width;
+      snap.height = src.height;
+    }
+    const sctx = snap.getContext('2d');
+    if (!sctx) { this.slideSnap = null; this.slideP = 1; return; }
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, snap.width, snap.height);
+    sctx.drawImage(src, 0, 0);
+    this.slideDir = dir;
+    this.slideP = 0;
   }
 
   // ---- Sebzés / halál ----
@@ -777,6 +841,7 @@ export class World {
     if (!dot) {
       p.invuln = PLAYER_BASE.invulnTime;
       this.addShake(8);
+      this.triggerHitStop(0.06);   // a bejövő ütés súlya (DoT-tick nem fagyaszt)
       // a sebzés forrása szerint más-más hang (méreg / tűz / energia / általános)
       if (sound === 'acid') this.audio.acid();
       else if (sound === 'burn') this.audio.burn();
@@ -816,11 +881,14 @@ export class World {
     this.particles.spawn(enemy.x, enemy.y, enemy.col, enemy.boss ? 40 : 12, enemy.boss ? 320 : 180, enemy.boss ? 0.9 : 0.45);
     this.particles.spawn(enemy.x, enemy.y, '#fff', enemy.boss ? 16 : 4, 200, 0.4);
     this.addShake(enemy.boss ? 14 : 4);
+    this.triggerHitStop(enemy.boss ? 0.09 : 0.04);   // ölés-súly (boss erősebb)
     this.score += enemy.score;
     this.addFloater(enemy.x, enemy.y, `+${enemy.score}`, '#f3e2bf');
 
-    // Maradandó folt a padlón
-    this.currentRoom.splats.push({
+    // Maradandó folt a padlón (plafonnal: a legrégebbit dobjuk, ne nőjön korlátlanul)
+    const splats = this.currentRoom.splats;
+    if (splats.length >= MAX_SPLATS) splats.shift();
+    splats.push({
       x: enemy.x,
       y: enemy.y,
       size: enemy.r * rand(1.2, 1.8),
@@ -903,6 +971,8 @@ export class World {
 
   /** A felugró ablak „Megveszem / Felveszem / Rendben" gombja. */
   acceptOffer(): void {
+    // labirintus-jutalom kártyája: a RENDBEN kilép a labirintusból
+    if (this.pendingLabExit) { this.pendingLabExit = false; this.exitLabyrinth(); return; }
     // puszta értesítő ablak (pl. „Nem nyertél") — csak bezár
     if (this.pendingNotice) { this.pendingNotice = false; return; }
 
@@ -921,7 +991,7 @@ export class World {
     if (!s || s.sold) return;
     if (this.player.coins < s.price) {
       this.audio.denied();
-      this.addFloater(this.player.x, this.player.y - 30, 'Not enough coins!', '#ff6a6a');
+      this.addFloater(this.player.x, this.player.y - 30, tr('fx.noCoins'), '#ff6a6a');
       s.declined = true;
       return;
     }
@@ -932,11 +1002,13 @@ export class World {
 
   /** A felugró ablak „Mégsem" gombja (vagy ESC): az ajánlat elutasítása. */
   declineOffer(): void {
+    // labirintus-jutalom kártyája: ESC is kilép (a jutalom már a játékoson van)
+    if (this.pendingLabExit) { this.pendingLabExit = false; this.exitLabyrinth(); return; }
     if (this.pendingNotice) { this.pendingNotice = false; return; }
     const gi = this.pendingGambleItem;
     this.pendingGambleItem = null;
     if (gi) {
-      this.addFloater(this.player.x, this.player.y - 30, `Skipped: ${gi.name}`, '#9a93a8');
+      this.addFloater(this.player.x, this.player.y - 30, tr('fx.skipped', { name: itemName(gi) }), '#9a93a8');
       return;
     }
     const pd = this.pendingPedestal;
@@ -953,7 +1025,7 @@ export class World {
     this.player.collected.push(item);
     this.player.refreshLook();
     this.audio.item();
-    this.addFloater(this.player.x, this.player.y - 30, `${item.name} — ${item.desc}`, item.col);
+    this.addFloater(this.player.x, this.player.y - 30, tr('fx.pickup', { name: itemName(item), desc: itemDesc(item) }), item.col);
     this.particles.spawn(this.player.x, this.player.y, item.col, 22, 260, 0.8);
   }
 
@@ -964,7 +1036,7 @@ export class World {
     this.player.collected.push(pd.item);
     this.player.refreshLook();
     this.audio.item();
-    this.addFloater(this.player.x, this.player.y - 30, `${pd.item.name} — ${pd.item.desc}`, pd.item.col);
+    this.addFloater(this.player.x, this.player.y - 30, tr('fx.pickup', { name: itemName(pd.item), desc: itemDesc(pd.item) }), pd.item.col);
     this.particles.spawn(pd.x, pd.y, pd.item.col, 20, 200, 0.7);
   }
 
@@ -979,7 +1051,7 @@ export class World {
       item.apply(this.player);
       this.player.collected.push(item);
       this.player.refreshLook();
-      this.addFloater(this.player.x, this.player.y - 30, `${item.name} — ${item.desc}`, item.col);
+      this.addFloater(this.player.x, this.player.y - 30, tr('fx.pickup', { name: itemName(item), desc: itemDesc(item) }), item.col);
     } else {
       const c = s.offer.cons;
       if (c === 'bomb') this.player.bombs++;
@@ -1004,7 +1076,7 @@ export class World {
   private doGamble(shop: Shop): void {
     if (this.player.coins < GAMBLE_COST) {
       this.audio.denied();
-      this.addFloater(shop.ax, shop.ay - 60, 'Not enough coins!', '#ff6a6a');
+      this.addFloater(shop.ax, shop.ay - 60, tr('fx.noCoins'), '#ff6a6a');
       return;
     }
     this.player.coins -= GAMBLE_COST;
@@ -1023,12 +1095,12 @@ export class World {
       this.particles.spawn(x, y, '#6a6478', 8, 140, 0.5);
       this.pendingNotice = true;
       this.callbacks.onOffer({
-        badge: '🎰 GAMBLE',
-        title: 'No win',
-        desc: "Luck wasn't on your side this time.",
-        sub: 'Try again, or reroll the offer!',
+        badge: tr('offer.gamble.badge'),
+        title: tr('offer.gamble.noWinTitle'),
+        desc: tr('offer.gamble.noWinDesc'),
+        sub: tr('offer.gamble.noWinSub'),
         color: '#9a93a8',
-        acceptLabel: 'OK',
+        acceptLabel: tr('offer.ok'),
         hideDecline: true,
       });
       return;
@@ -1042,7 +1114,7 @@ export class World {
     } else if (out.kind === 'bomb') {
       p.bombs++;
       this.audio.buy();
-      this.addFloater(x, y, '+Bomb', '#cfcfd6');
+      this.addFloater(x, y, tr('fx.plusBomb'), '#cfcfd6');
     } else if (out.kind === 'tnt') {
       p.tnt++;
       this.audio.buy();
@@ -1050,12 +1122,12 @@ export class World {
     } else if (out.kind === 'heart') {
       p.hp = clamp(p.hp + HP.heart, 0, p.maxHp);
       this.audio.buy();
-      this.addFloater(x, y, '+Heart', '#ff5b6a');
+      this.addFloater(x, y, tr('fx.plusHeart'), '#ff5b6a');
     } else {
       // JACKPOT: véletlen tárgy (a közös, súlyozott rollItem — a perkWeight itt is él)
       const item = rollItem();
       this.audio.jackpot();
-      this.addFloater(x, y, `JACKPOT! ${item.name}`, '#ffe9a8');
+      this.addFloater(x, y, tr('fx.jackpot', { name: itemName(item) }), '#ffe9a8');
       this.particles.spawn(x, y, item.col, 26, 300, 0.9);
       this.addShake(6);
       if (item.skill) {
@@ -1076,13 +1148,13 @@ export class World {
     const curId = this.player.activeSkillId;
     const cur = curId && curId !== item.skill ? SKILL_BY_ID[curId] : undefined;
     this.callbacks.onOffer({
-      badge: '✨ SKILL WON',
-      title: skill ? skill.name : item.name,
-      desc: skill ? skill.desc : item.desc,
-      sub: (skill ? `Active skill · charges over ${skill.chargeMax} rooms` : item.desc)
-        + (cur ? `  ·  replaces: ${cur.name}` : ''),
+      badge: tr('offer.skillWon.badge'),
+      title: skill ? skillName(skill) : itemName(item),
+      desc: skill ? skillDesc(skill) : itemDesc(item),
+      sub: (skill ? tr('offer.activeSkill', { n: skill.chargeMax }) : itemDesc(item))
+        + (cur ? tr('offer.replaces', { name: skillName(cur) }) : ''),
       color: item.col,
-      acceptLabel: 'TAKE',
+      acceptLabel: tr('offer.take'),
     });
   }
 
@@ -1090,7 +1162,7 @@ export class World {
     const price = rerollPrice(shop.rerollUses);
     if (this.player.coins < price) {
       this.audio.denied();
-      this.addFloater(shop.rx, shop.ry - 30, `Reroll: ${price}¢ — not enough`, '#ff6a6a');
+      this.addFloater(shop.rx, shop.ry - 30, tr('fx.rerollPoor', { price }), '#ff6a6a');
       return;
     }
     this.player.coins -= price;
@@ -1098,7 +1170,7 @@ export class World {
     this.pendingStall = null;
     this.audio.gamble();
     this.particles.spawn(shop.rx, shop.ry - 6, '#7fe0c4', 16, 200, 0.6);
-    this.addFloater(shop.rx, shop.ry - 30, `New offer! (−${price}¢)`, '#bdeedd');
+    this.addFloater(shop.rx, shop.ry - 30, tr('fx.rerollOk', { price }), '#bdeedd');
   }
 
   /** Bolt-frissítés: animáció + stand-közelség → vásárlás megerősítő ablak. */
@@ -1114,12 +1186,12 @@ export class World {
       this.pendingPedestal = pd;
       const skill = SKILL_BY_ID[pd.item.skill];
       this.callbacks.onOffer({
-        badge: '✨ FREE SKILL',
-        title: skill ? skill.name : pd.item.name,
-        desc: skill ? skill.desc : pd.item.desc,
-        sub: skill ? `Active skill · press E · charges over ${skill.chargeMax} rooms` : pd.item.desc,
+        badge: tr('offer.freeSkill.badge'),
+        title: skill ? skillName(skill) : itemName(pd.item),
+        desc: skill ? skillDesc(skill) : itemDesc(pd.item),
+        sub: skill ? tr('offer.activeSkillE', { n: skill.chargeMax }) : itemDesc(pd.item),
         color: pd.item.col,
-        acceptLabel: 'TAKE',
+        acceptLabel: tr('offer.take'),
       });
     } else {
       this.collectPedestal(pd);
@@ -1138,12 +1210,12 @@ export class World {
       this.pendingStall = s;
       const view = offerView(s.offer);
       this.callbacks.onOffer({
-        badge: s.offer.kind === 'item' ? '🛒 PURCHASE' : '🛒 CONSUMABLE',
+        badge: s.offer.kind === 'item' ? tr('offer.purchase.badge') : tr('offer.consumable.badge'),
         title: view.name,
         desc: view.desc,
-        sub: `Price: ${s.price}¢  ·  you have: ${p.coins}¢`,
+        sub: tr('offer.priceHave', { price: s.price, coins: p.coins }),
         color: view.color,
-        acceptLabel: `BUY (${s.price}¢)`,
+        acceptLabel: tr('offer.buy', { price: s.price }),
       });
       return;
     }
@@ -1158,7 +1230,7 @@ export class World {
     skill.activate(this);
     this.player.skillCharge = 0;
     this.audio.skill();
-    this.addFloater(this.player.x, this.player.y - 34, `${skill.name}!`, skill.col);
+    this.addFloater(this.player.x, this.player.y - 34, `${skillName(skill)}!`, skill.col);
   }
 
   private chargeSkill(): void {
@@ -1191,7 +1263,7 @@ export class World {
       e.x = clamp(e.x + (dx / d) * push, rc.x + e.r, rc.x + rc.w - e.r);
       e.y = clamp(e.y + (dy / d) * push, rc.y + e.r, rc.y + rc.h - e.r);
       e.hp -= dmg;
-      e.flash = 0.1;
+      if (!e.boss) e.flash = 0.1;
       this.addDamage(e.x, e.y - e.r, dmg, { color: '#aef3ff' });
       if (e.hp <= 0) this.killEnemy(e);
     }
@@ -1226,7 +1298,7 @@ export class World {
           // áthaladás egy találatot adjon (ne minden képkockán üssön)
           if (this.familiarT >= (this.orbitHitAt.get(e) ?? 0)) {
             e.hp -= 1000;
-            e.flash = 0.1;
+            if (!e.boss) e.flash = 0.1;
             this.addDamage(e.x, e.y - e.r, 1000, { color: '#cfe8ff' });
             this.orbitHitAt.set(e, this.familiarT + 0.45);
             if (e.hp <= 0) this.killEnemy(e);
@@ -1353,7 +1425,7 @@ export class World {
     for (const e of [...this.currentRoom.enemies]) {
       if (dist2(e.x, e.y, b.x, b.y) <= r2) {
         e.hp -= b.dmg;
-        e.flash = 0.12;
+        if (!e.boss) e.flash = 0.12;
         this.addDamage(e.x, e.y - e.r, b.dmg, { color: '#ffb15a' });
         if (e.hp <= 0) this.killEnemy(e);
       }
@@ -1378,7 +1450,7 @@ export class World {
         arr.splice(i, 1);
         this.player.attachedTicks.push(0);
         this.particles.spawn(this.player.x, this.player.y, '#7a3a3a', 10, 140, 0.4);
-        this.addFloater(this.player.x, this.player.y - 26, 'a tick latched on!', '#c86a6a');
+        this.addFloater(this.player.x, this.player.y - 26, tr('fx.tickLatch'), '#c86a6a');
         this.audio.hitEnemy();
       }
     }
@@ -1414,7 +1486,7 @@ export class World {
     this.addShake(5);
     this.audio.hurt();
     this.particles.spawn(p.x, p.y, '#aa3a3a', 12, 150, 0.45);
-    this.addFloater(p.x, p.y - 22, 'tick −1', '#d05a5a');
+    this.addFloater(p.x, p.y - 22, tr('fx.tickMinus'), '#d05a5a');
     if (p.hp <= 0) this.killPlayer();
   }
 
@@ -1448,11 +1520,15 @@ export class World {
   // ---- Frissítés ----
   update(dt: number): void {
     if (this.hub) { this.updateHub(dt); return; } // hub: harc nélküli mód-választó
+    // Hit-stop: pár frame-re a teljes játékmenet áll (a kiváltó ütés „súlyt" kap).
+    // VALÓS dt-vel csökken (nem a fagyasztott idővel), így mindig feloldódik.
+    if (this.hitStop > 0) { this.hitStop -= dt; return; }
     this.computeRoom();
     this.collision.indexEnemies(); // ellenfél-térrács erre a frame-re (lövedék-broad-phase)
     this.runStats.tick(dt);
-    if (this.transition > 0) this.transition -= dt;
+    if (this.slideP < 1) this.slideP = Math.min(1, this.slideP + dt / World.SLIDE_DUR);
     if (this.enemyFreezeT > 0) this.enemyFreezeT -= dt;
+    if (this.bossIntro) { this.bossIntro.t -= dt; if (this.bossIntro.t <= 0) this.bossIntro = null; }
 
     // Csalások: kivégzés (Szóköz → minden ellenfél) + max arany (folyamatos feltöltés)
     if (this._cheats.execute && this.input.isDown(' ')) {
@@ -1533,7 +1609,7 @@ export class World {
         // gáz-lövedék: a SZOBA végéig -50% sebesség (a 9999 mp-et a szobaváltás törli)
         if (b.slow) {
           this.player.applySlow(0.5, 9999);
-          this.addFloater(this.player.x, this.player.y - 22, 'SLOW −50%', '#9fdf4a');
+          this.addFloater(this.player.x, this.player.y - 22, tr('fx.slow'), '#9fdf4a');
         }
         this.ebullets.splice(i, 1);
       }
@@ -1581,7 +1657,7 @@ export class World {
         } else if (pk.type === 'bomb') {
           this.player.bombs++;
           this.audio.pickup();
-          this.addFloater(pk.x, pk.y - 16, '+bomb', '#cfcfd6');
+          this.addFloater(pk.x, pk.y - 16, tr('fx.plusBomb'), '#cfcfd6');
           room.pickups.splice(i, 1);
         } else {
           this.player.coins++;
@@ -1607,7 +1683,7 @@ export class World {
       this.chargeSkill();
       if (room.type === 'boss') {
         this.trapdoor = { x: this.cx, y: this.cy, bob: 0 };
-        this.addFloater(this.cx, this.cy - 60, 'BOSS DEFEATED!', '#ff7b4d');
+        this.addFloater(this.cx, this.cy - 60, tr('fx.bossDefeated'), '#ff7b4d');
         this.score += 500;
         // Az első legyőzött boss a futásban → Sentex narrációja.
         if (!this.firstBossVoicePlayed) {
@@ -1660,17 +1736,34 @@ export class World {
       const TILE = ROOM.TILE;
       const ex = (this.labyrinth.exit.col + 0.5) * TILE;
       const ey = (this.labyrinth.exit.row + 0.5) * TILE;
-      if (this.labWon) {
-        this.labWinTimer += dt;
-        if (this.labWinTimer > 1.3) this.exitLabyrinth();
-      } else if (dist2(this.player.x, this.player.y, ex, ey) < (TILE * 0.55) ** 2) {
+      if (!this.labWon && dist2(this.player.x, this.player.y, ex, ey) < (TILE * 0.55) ** 2) {
         this.labWon = true;
         this.score += 100 * this.floor; // teljesítés-bónusz (mint a csapóajtónál)
         // labirintus-idő rekord (fejezetenként stabil → versenyezhető), majd számláló
         recordLabClear(this.labChapterId, this.runStats.lab);
         this.runStats.labsCleared++;
         this.audio.door();
-      } else if (this.player.alive && (this.labTimeLeft -= dt) <= 0) {
+        // JUTALOM a kockázatért (időlimit + ellenfelek): garantált tárgy + érme.
+        // A tárgy/érme a karakteren marad (a kapun át indított labirintusban).
+        const reward = rollItem();
+        this.giveItem(reward);
+        const coins = 8 + this.floor * 2;
+        this.player.coins += coins;
+        this.score += coins * 25;
+        this.particles.spawn(this.player.x, this.player.y, '#ffd36a', 22, 220, 0.8);
+        // megálló jutalom-kártya: a játékos rendesen lássa, mit kapott; a kilépést
+        // a RENDBEN gomb (vagy ESC) váltja ki (lásd acceptOffer/declineOffer).
+        this.pendingLabExit = true;
+        this.callbacks.onOffer({
+          badge: tr('lab.reward.badge'),
+          title: itemName(reward),
+          desc: itemDesc(reward),
+          sub: tr('lab.reward.sub', { coins }),
+          color: reward.col,
+          acceptLabel: tr('offer.ok'),
+          hideDecline: true,
+        });
+      } else if (!this.labWon && this.player.alive && (this.labTimeLeft -= dt) <= 0) {
         // lejárt a visszaszámláló: a futás véget ér (mintha elesett volna)
         this.labTimeLeft = 0;
         this.killPlayer();
@@ -1707,7 +1800,7 @@ export class World {
         if (this.hubArmed) {
           this.hubArmed = false;
           if (p.locked) {
-            this.addFloater(c.x, c.y - 38, 'COMING SOON', '#cdbb9a');
+            this.addFloater(c.x, c.y - 38, tr('fx.comingSoon'), '#cdbb9a');
             this.audio.denied();
           } else {
             this.audio.stairs();
@@ -1793,8 +1886,23 @@ export class World {
   render(ctx: CanvasRenderingContext2D): void {
     if (this.hub) { this.renderHub(ctx); return; }
     if (this.labyrinth) { this.renderLabyrinth(ctx); return; }
+
+    // Szobaváltás-csúsztatás: az új szoba a mozgásirány felőli képernyő-élről
+    // úszik be (slx/sly), a régi pillanatkép vele szemben csúszik ki (lent).
+    const sliding = this.slideP < 1 && this.slideSnap !== null && this.slideDir !== null;
+    let slx = 0, sly = 0;
+    let se = 0;
+    if (sliding) {
+      const W = this.engine.width, H = this.engine.height;
+      se = 1 - Math.pow(1 - this.slideP, 3); // easeOutCubic
+      const sx = this.slideDir === 'E' ? W : this.slideDir === 'W' ? -W : 0;
+      const sy = this.slideDir === 'N' ? -H : this.slideDir === 'S' ? H : 0;
+      slx = sx * (1 - se);
+      sly = sy * (1 - se);
+    }
+
     ctx.save();
-    if (this.fx.shake > 0) ctx.translate(rand(-this.fx.shake, this.fx.shake) * 0.5, rand(-this.fx.shake, this.fx.shake) * 0.5);
+    ctx.translate(slx + this.fx.camOffX(), sly + this.fx.camOffY());
 
     ctx.fillStyle = '#0a0810';
     ctx.fillRect(0, 0, this.engine.width, this.engine.height);
@@ -1810,8 +1918,8 @@ export class World {
     if (room.pedestal && !room.pedestal.taken) room.pedestal.draw(ctx);
     if (room.gate) this.drawGate(ctx, room.gate);
     if (room.dungeonGate) this.drawDungeonGate(ctx, room.dungeonGate);
-    if (this.trapdoor) this.drawTrapdoor(ctx);
-    this.drawProjectileGlow(ctx);
+    if (this.trapdoor) drawTrapdoor(ctx, this.trapdoor);
+    drawProjectileGlow(ctx, this.tears, this.ebullets, this.bombs);
     for (const bomb of this.bombs) bomb.draw(ctx);
 
     const bulletT = performance.now() / 1000;
@@ -1824,8 +1932,10 @@ export class World {
     this.drawFamiliars(ctx); // keringő orbok + blokkoló légy (Wave 4)
     this.drawAttachedTicks(ctx); // a játékoson ülő kullancsok
 
-    // szoba-méretű légköri animáció (eső/köd/szél…) az entitások fölött
-    if (room.anim) room.anim(ctx, this._room, performance.now() / 1000);
+    // szoba-méretű légköri animáció (eső/köd/szél…) az entitások fölött.
+    // A sablon-jel erősebb; ha nincs, a fejezet-téma alap-effektje (ambient) szól.
+    const ambient = room.anim ?? (this._theme.ambient ? MAP_ANIM_BY_CH[this._theme.ambient] : undefined);
+    if (ambient) ambient(ctx, this._room, performance.now() / 1000);
 
     // ködfelhők az entitások fölött (ténylegesen eltakarják, ami alattuk van)
     this.hazards.drawFog(ctx);
@@ -1838,39 +1948,20 @@ export class World {
     this.fx.draw(ctx);
 
     // teszt-aréna: minden (nem-boss) ellenfél fölött a TÉNYLEGES sebzése
-    if (this.sandbox) this.drawSandboxLabels(ctx);
+    if (this.sandbox) drawDamageLabels(ctx, this.currentRoom.enemies, this.floor);
 
     ctx.restore();
 
-    if (this.transition > 0) {
-      ctx.fillStyle = `rgba(0,0,0,${clamp(this.transition * 3, 0, 0.6)})`;
-      ctx.fillRect(0, 0, this.engine.width, this.engine.height);
+    // A régi szoba pillanatképe a mozgásiránnyal SZEMBEN csúszik ki (ugyanaz az
+    // eased érték, így a két szoba éle pontosan egymáshoz simul, nincs rés).
+    if (sliding && this.slideSnap) {
+      const W = this.engine.width, H = this.engine.height;
+      const ox = (this.slideDir === 'E' ? -W : this.slideDir === 'W' ? W : 0) * se;
+      const oy = (this.slideDir === 'N' ? H : this.slideDir === 'S' ? -H : 0) * se;
+      ctx.drawImage(this.slideSnap, ox, oy, W, H);
     }
   }
 
-  /**
-   * Teszt-aréna: a nem-boss ellenfelek bal felső sarkába a mélységgel skálázott
-   * TÉNYLEGES érintés-sebzés (pontban) — így az admin-kártya bázisához képest
-   * azonnal látszik, mennyit üt valójában az aktuális szinten. A bossok fix
-   * sebzésűek (nem skálázódnak), ezért rájuk nem írunk.
-   */
-  private drawSandboxLabels(ctx: CanvasRenderingContext2D): void {
-    ctx.save();
-    ctx.font = '700 12px "Segoe UI", system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    ctx.shadowColor = 'rgba(0,0,0,0.85)';
-    ctx.shadowBlur = 3;
-    ctx.fillStyle = '#ff9a7a';
-    for (const e of this.currentRoom.enemies) {
-      if (!(e instanceof Enemy) || e.dmg <= 0) continue;
-      const actual = scaleIncomingDamage(e.dmg * HP.half, this.floor);
-      ctx.fillText(`${actual}`, e.x - e.r, e.y - e.r - 2);
-    }
-    ctx.restore();
-  }
-
-  /** Lebegő szövegek (sebzésszámok + értesítők) — világ-koordinátában rajzolva. */
   // ---- Hub (mód-választó) kirajzolása ----
   /**
    * Hub-render: egyetlen, normál méretű terem (ajtók nélkül), középen a rúna-
@@ -1880,7 +1971,7 @@ export class World {
    */
   private renderHub(ctx: CanvasRenderingContext2D): void {
     ctx.save();
-    if (this.fx.shake > 0) ctx.translate(rand(-this.fx.shake, this.fx.shake) * 0.5, rand(-this.fx.shake, this.fx.shake) * 0.5);
+    ctx.translate(this.fx.camOffX(), this.fx.camOffY());
 
     ctx.fillStyle = '#0a0810';
     ctx.fillRect(0, 0, this.engine.width, this.engine.height);
@@ -1948,7 +2039,7 @@ export class World {
     ctx.fillRect(0, 0, this.engine.width, this.engine.height);
 
     ctx.save();
-    if (this.fx.shake > 0) ctx.translate(rand(-this.fx.shake, this.fx.shake) * 0.5, rand(-this.fx.shake, this.fx.shake) * 0.5);
+    ctx.translate(this.fx.camOffX(), this.fx.camOffY());
     ctx.beginPath();
     ctx.rect(box.x, box.y, box.w, box.h);
     ctx.clip();
@@ -1970,7 +2061,7 @@ export class World {
     this.particles.draw(ctx);
     const room = this.currentRoom;
     for (const pk of room.pickups) pk.draw(ctx);
-    this.drawProjectileGlow(ctx);
+    drawProjectileGlow(ctx, this.tears, this.ebullets, this.bombs);
     for (const bomb of this.bombs) bomb.draw(ctx);
     const bulletT = performance.now() / 1000;
     for (const b of this.ebullets) drawBullet(ctx, b, bulletT);
@@ -2001,19 +2092,6 @@ export class World {
   }
 
   /** Finom additív fénykör a lövedékekre/könnyekre/bombákra (a látótáv-sötétség változatlan). */
-  private drawProjectileGlow(ctx: CanvasRenderingContext2D): void {
-    if (this.tears.length === 0 && this.ebullets.length === 0 && this.bombs.length === 0) return;
-    const pulse = 0.82 + 0.18 * Math.sin(performance.now() / 110);
-    withGlow(ctx, () => {
-      for (const t of this.tears) drawGlow(ctx, t.x, t.y, t.r * 3.4, t.color, 0.5 * pulse);
-      for (const b of this.ebullets) {
-        const col = b.poison || b.slime ? '#bfff6a' : b.slow ? '#9fdf4a' : '#ff8a5a';
-        drawGlow(ctx, b.x, b.y, (b.r + 4) * 2.6, col, 0.42 * pulse);
-      }
-      for (const bomb of this.bombs) drawGlow(ctx, bomb.x, bomb.y, 30, '#ff7b3a', 0.32 * pulse);
-    });
-  }
-
   /**
    * 2D fény-térkép összeállítása és kitétele: a játékos-fáklya (a `sight` skálázza
    * a sugarát), a lövedékek, a bombák és a tűz/láva-veszélyek mint dinamikus
@@ -2124,81 +2202,16 @@ export class World {
     );
   }
 
-  /**
-   * A statikus padló-réteget (padló + pocsolyák) gyorsítótárból teszi ki: ha a
-   * szoba/méret/téma kulcs változott, egyszer újrasüti egy off-screen canvasra,
-   * majd frame-enként csak egyetlen `drawImage`. Ez kiváltja a ~280 csempe
-   * képkockánkénti újrarajzolását (a render forró útjának fő tétele).
-   */
   private drawCachedFloor(ctx: CanvasRenderingContext2D): void {
-    const rc = this._room;
-    const room = this.currentRoom;
-    const dpr = this.engine.pixelRatio;
-    const key = `${room.gx},${room.gy}|${Math.round(rc.x)},${Math.round(rc.y)},${Math.round(rc.w)},${Math.round(rc.h)}|${this._theme.floor}|${dpr}`;
-
-    if (key !== this.floorCacheKey || !this.floorCache) {
-      this.bakeFloor(dpr);
-      this.floorCacheKey = key;
-    }
-    if (this.floorCache) ctx.drawImage(this.floorCache, rc.x, rc.y, rc.w, rc.h);
+    this.floors.drawFloor(ctx, this._room, this.currentRoom, this._theme, this.engine.pixelRatio, (x, y) => this.isBlocked(x, y));
   }
 
-  /** A padló + pocsolyák egyszeri kirajzolása az off-screen gyorsítótárra. */
-  private bakeFloor(dpr: number): void {
-    const rc = this._room;
-    const cw = Math.max(1, Math.round(rc.w * dpr));
-    const ch = Math.max(1, Math.round(rc.h * dpr));
-    let cv = this.floorCache;
-    if (!cv) { cv = document.createElement('canvas'); this.floorCache = cv; }
-    if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
-    const cctx = cv.getContext('2d');
-    if (!cctx) return;
-    // A világ-koordinátákat (rc.x,rc.y a bal-felső sarok) a canvas (0,0)-jára
-    // toljuk, eszköz-pixel élességgel: a drawFloorTiles/drawPuddles abszolút
-    // koordinátákkal dolgozik, így változatlanul újrahasználható.
-    cctx.setTransform(dpr, 0, 0, dpr, -rc.x * dpr, -rc.y * dpr);
-    cctx.clearRect(rc.x, rc.y, rc.w, rc.h);
-    drawFloorTiles(cctx, rc, this._theme);
-    drawPuddles(cctx, rc, this.currentRoom, (x, y) => this.isBlocked(x, y));
-  }
-
-  /**
-   * Maradandó vérfoltok — a `floorCache`-hez hasonló GYORSÍTÓTÁRBÓL. A `drawSplats`
-   * determinisztikus (a folt pozíciójából hash-elt), így elég egyszer egy
-   * off-screen rétegre bélyegezni, és frame-enként csak egy `drawImage`. A réteg a
-   * szoba/méret/folt-szám változására sül újra (új ölésnél +1 folt → újrasül).
-   */
   private drawCachedSplats(ctx: CanvasRenderingContext2D): void {
-    const room = this.currentRoom;
-    if (room.splats.length === 0) return; // nincs folt → nincs réteg
-    const rc = this._room;
-    const dpr = this.engine.pixelRatio;
-    const key = `${room.gx},${room.gy}|${room.splats.length}|${Math.round(rc.x)},${Math.round(rc.y)},${Math.round(rc.w)},${Math.round(rc.h)}|${dpr}`;
-    if (key !== this.splatCacheKey || !this.splatCache) {
-      this.bakeSplats(dpr);
-      this.splatCacheKey = key;
-    }
-    if (this.splatCache) ctx.drawImage(this.splatCache, rc.x, rc.y, rc.w, rc.h);
-  }
-
-  /** A vérfoltok egyszeri kirajzolása az off-screen splat-gyorsítótárra. */
-  private bakeSplats(dpr: number): void {
-    const rc = this._room;
-    const cw = Math.max(1, Math.round(rc.w * dpr));
-    const ch = Math.max(1, Math.round(rc.h * dpr));
-    let cv = this.splatCache;
-    if (!cv) { cv = document.createElement('canvas'); this.splatCache = cv; }
-    if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
-    const cctx = cv.getContext('2d');
-    if (!cctx) return;
-    cctx.setTransform(dpr, 0, 0, dpr, -rc.x * dpr, -rc.y * dpr);
-    cctx.clearRect(rc.x, rc.y, rc.w, rc.h);
-    drawSplats(cctx, this.currentRoom);
+    this.floors.drawSplats(ctx, this._room, this.currentRoom, this.engine.pixelRatio);
   }
 
   private drawRoom(ctx: CanvasRenderingContext2D): void {
     const rc = this._room;
-    const W = ROOM.WALL;
     const th = this._theme;
 
     if (this.currentRoom.type === 'item') {
@@ -2221,30 +2234,8 @@ export class World {
       ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
     }
 
-    // falak
-    ctx.fillStyle = th.wall;
-    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, W);
-    ctx.fillRect(rc.x - W, rc.y + rc.h, rc.w + W * 2, W);
-    ctx.fillRect(rc.x - W, rc.y, W, rc.h);
-    ctx.fillRect(rc.x + rc.w, rc.y, W, rc.h);
-    ctx.strokeStyle = th.wallEdge;
-    ctx.lineWidth = 4;
-    ctx.strokeRect(rc.x - 2, rc.y - 2, rc.w + 4, rc.h + 4);
-    ctx.fillStyle = th.wallTop;
-    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, 5);
-
-    // ajtók (a rács felhúzottsága a doorT animációs értékből)
-    const cx = this.cx;
-    const cy = this.cy;
-    const doors: Array<[Dir, number, number, number]> = [
-      ['N', cx, rc.y, 0],
-      ['S', cx, rc.y + rc.h, Math.PI],
-      ['W', rc.x, cy, -Math.PI / 2],
-      ['E', rc.x + rc.w, cy, Math.PI / 2],
-    ];
-    for (const [dir, dx, dy, rot] of doors) {
-      if (this.dungeon.hasNeighbor(dir)) this.drawDoor(ctx, dx, dy, rot, this.doorT);
-    }
+    drawWalls(ctx, rc, th);
+    drawDoors(ctx, rc, this.cx, this.cy, this.doorT, th, (dir) => this.dungeon.hasNeighbor(dir));
   }
 
   private drawObstacles(ctx: CanvasRenderingContext2D): void {
@@ -2255,25 +2246,14 @@ export class World {
     // 2) tárgyak (alapfajták külön, a TEREPTÁR a közös rajzolón át)
     const t = performance.now() / 1000;
     for (const o of obs) {
+      const r = this.cellRect(o.col, o.row);
       if (o.kind === 'water') continue; // már megrajzoltuk
-      else if (o.kind === 'rock') this.drawRockCell(ctx, o);
-      else if (o.kind === 'tree') this.drawTreeCell(ctx, o);
-      else if (o.kind === 'crate') this.drawCrateCell(ctx, o);
-      else if (o.kind === 'luckrock') drawLuckRock(ctx, this.cellRect(o.col, o.row), o.col, o.row, t);
-      else drawTerrainObstacle(ctx, o.kind, this.cellRect(o.col, o.row), this._theme, o.col, o.row, t);
+      else if (o.kind === 'rock') drawRock(ctx, r, this._theme, o.col, o.row);
+      else if (o.kind === 'tree') drawTree(ctx, r, o.col, o.row);
+      else if (o.kind === 'crate') drawCrate(ctx, r, o.hp);
+      else if (o.kind === 'luckrock') drawLuckRock(ctx, r, o.col, o.row, t);
+      else drawTerrainObstacle(ctx, o.kind, r, this._theme, o.col, o.row, t);
     }
-  }
-
-  private drawRockCell(ctx: CanvasRenderingContext2D, o: Obstacle): void {
-    drawRock(ctx, this.cellRect(o.col, o.row), this._theme, o.col, o.row);
-  }
-
-  private drawTreeCell(ctx: CanvasRenderingContext2D, o: Obstacle): void {
-    drawTree(ctx, this.cellRect(o.col, o.row), o.col, o.row);
-  }
-
-  private drawCrateCell(ctx: CanvasRenderingContext2D, o: Obstacle): void {
-    drawCrate(ctx, this.cellRect(o.col, o.row), o.hp);
   }
 
   /**
@@ -2301,122 +2281,7 @@ export class World {
   }
 
   private drawWater(ctx: CanvasRenderingContext2D, cells: Obstacle[]): void {
-    const t = performance.now() / 1000;
-    const layout = this.waterLayout(cells);
-    const { set, rects, minX, minY, maxX, maxY } = layout;
-    const has = (c: number, r: number): boolean => set.has(`${c},${r}`);
-    const W = maxX - minX, H = maxY - minY;
-
-    ctx.save();
-    // vágás a víz-cellák uniójára → a folyó egységes felület lesz
-    ctx.beginPath();
-    for (const { r } of rects) ctx.rect(r.x, r.y, r.w, r.h);
-    ctx.clip();
-
-    // mély-víz alapszín, finom függőleges mélységi árnyalással
-    const bg = ctx.createLinearGradient(0, minY, 0, maxY);
-    bg.addColorStop(0, '#34708f');
-    bg.addColorStop(0.5, '#266079');
-    bg.addColorStop(1, '#1b4a60');
-    ctx.fillStyle = bg;
-    ctx.fillRect(minX, minY, W, H);
-
-    // mozgó fénytörés-fodrok (abszolút koordinátákból → cellák között folytonos)
-    const wave = (y: number, amp: number, color: string, lw: number, ph: number) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lw;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      for (let x = minX; x <= maxX; x += 9) {
-        const yy = y + Math.sin(x * 0.045 + t * 1.1 + ph) * amp + Math.sin(x * 0.12 - t * 0.6 + ph) * amp * 0.4;
-        if (x === minX) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
-      }
-      ctx.stroke();
-    };
-    for (let i = 0, y = minY + 12; y < maxY; y += 19, i++) {
-      wave(y, 2.6, 'rgba(15,48,66,0.35)', 3, i * 0.8);          // árnyék-hullámvölgy
-      wave(y - 3, 2.6, 'rgba(173,223,255,0.16)', 1.6, i * 0.8); // világos taraj
-    }
-
-    // csillámló napfény-foltok, lassan sodródva
-    ctx.fillStyle = 'rgba(214,242,255,0.10)';
-    for (let i = 0; i < 10; i++) {
-      const gx = minX + (((i * 89.7) + t * 26) % (W + 40)) - 20;
-      const gy = minY + ((i * 47.3) % H);
-      ctx.beginPath();
-      ctx.ellipse(gx, gy, 11, 2.3, 0, 0, TAU);
-      ctx.fill();
-    }
-    ctx.restore();
-
-    // ---- partvonal a szabad (víz nélküli szomszédú) éleken ----
-    for (const { o, r } of rects) {
-      const edge = (x1: number, y1: number, x2: number, y2: number, inset: number, nx: number, ny: number) => {
-        // sötét partszél
-        ctx.strokeStyle = 'rgba(10,28,40,0.5)';
-        ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-        // vékony hab-vonal beljebb
-        ctx.strokeStyle = 'rgba(200,236,255,0.28)';
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.moveTo(x1 + nx * inset, y1 + ny * inset);
-        ctx.lineTo(x2 + nx * inset, y2 + ny * inset);
-        ctx.stroke();
-      };
-      if (!has(o.col, o.row - 1)) edge(r.x, r.y, r.x + r.w, r.y, 3, 0, 1);
-      if (!has(o.col, o.row + 1)) edge(r.x, r.y + r.h, r.x + r.w, r.y + r.h, 3, 0, -1);
-      if (!has(o.col - 1, o.row)) edge(r.x, r.y, r.x, r.y + r.h, 3, 1, 0);
-      if (!has(o.col + 1, o.row)) edge(r.x + r.w, r.y, r.x + r.w, r.y + r.h, 3, -1, 0);
-    }
-  }
-
-  /**
-   * Ajtó kirajzolása. A `t` (0..1) a rács-kapu felhúzottsága: 0-nál a rács
-   * teljesen zárja a nyílást, 1-nél felcsúszott a szemöldökkőbe (nyitva).
-   * Köztes értékeknél a rács kifelé (a fal felé) csúszik fel, így animálódik.
-   */
-  private drawDoor(ctx: CanvasRenderingContext2D, x: number, y: number, rot: number, t: number): void {
-    const W = ROOM.WALL;
-    const D = ROOM.DOOR;
-    const th = this._theme;
-    const e = t * t * (3 - 2 * t); // smoothstep easing
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(rot);
-
-    // keret
-    ctx.fillStyle = th.doorFrame;
-    ctx.fillRect(-D, -W, D * 2, W * 2);
-    // nyitott padló-átjáró (háttér; a rács felcsúszva ezt fedi fel)
-    ctx.fillStyle = th.doorFloor;
-    ctx.fillRect(-D + 6, -W, D * 2 - 12, W * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(-D + 6, -4, D * 2 - 12, 8);
-
-    if (e < 0.999) {
-      // rács-kapu, a nyílásba vágva, kifelé (-y) felcsúszva e-vel arányosan
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(-D + 6, -W, D * 2 - 12, W * 2);
-      ctx.clip();
-      ctx.translate(0, -W * 2 * e);
-      ctx.fillStyle = th.doorBar;
-      ctx.fillRect(-D + 6, -W + 4, D * 2 - 12, W * 2 - 8);
-      ctx.strokeStyle = th.doorBarStroke;
-      ctx.lineWidth = 4;
-      for (let i = -D + 16; i < D; i += 16) {
-        ctx.beginPath();
-        ctx.moveTo(i, -W + 4);
-        ctx.lineTo(i, W - 4);
-        ctx.stroke();
-      }
-      // alsó zárógerenda, hogy a felcsúszás látványos legyen
-      ctx.fillStyle = th.doorBarStroke;
-      ctx.fillRect(-D + 6, W - 8, D * 2 - 12, 5);
-      ctx.restore();
-    }
-    ctx.restore();
+    drawWaterBody(ctx, this.waterLayout(cells), performance.now() / 1000);
   }
 
   /** Labirintus-kapu (portál) kirajzolása a rács-pozíciójára. */
@@ -2431,27 +2296,4 @@ export class World {
     drawDungeonPortal(ctx, c.x, c.y, 30, this._theme.accent, performance.now() / 1000);
   }
 
-  private drawTrapdoor(ctx: CanvasRenderingContext2D): void {
-    const td = this.trapdoor!;
-    ctx.save();
-    ctx.translate(td.x, td.y);
-    ctx.fillStyle = '#0a0610';
-    ctx.strokeStyle = '#3a2c20';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(0, 0, 26, 0, TAU);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = `rgba(160,120,255,${0.3 + 0.2 * Math.sin(td.bob)})`;
-    ctx.beginPath();
-    ctx.arc(0, 0, 18, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#cdaaff';
-    ctx.font = 'bold 18px system-ui';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('▼', 0, 1);
-    ctx.textBaseline = 'alphabetic';
-    ctx.restore();
-  }
 }

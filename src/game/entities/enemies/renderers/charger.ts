@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, drawHorns } from './helpers';
+import { lighten, darken, shadow, drawHorns, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  CHARGER — sárga zömök bika-fenevad, a nekifutás irányába mutató szarvakkal
@@ -36,11 +36,7 @@ export function drawCharger(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   drawHorns(ctx, v, dark, light);
 
   // test (tömzsi, kissé szélesebb)
-  const bodyGrad = ctx.createLinearGradient(0, -r, 0, r);
-  bodyGrad.addColorStop(0, light);
-  bodyGrad.addColorStop(0.55, body);
-  bodyGrad.addColorStop(1, darken(v.col, 0.28));
-  ctx.fillStyle = v.flash ? '#fff' : bodyGrad;
+  ctx.fillStyle = v.flash ? '#fff' : linear3(ctx, 0, -r, 0, r, 0.55, light, body, darken(v.col, 0.28));
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;
   ctx.beginPath();

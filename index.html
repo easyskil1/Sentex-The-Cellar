@@ -6,6 +6,13 @@
   <title>Sentex: The Cellar</title>
   <!-- Procedurális, beágyazott favicon (nincs asset-fájl) → nincs /favicon.ico 404. -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23241d2a'/%3E%3Ccircle cx='16' cy='16' r='8' fill='%23cdbfe0'/%3E%3Ccircle cx='16' cy='16' r='3.4' fill='%23c22a1a'/%3E%3C/svg%3E" />
+  <!-- PWA: telepíthető, offline build (kézi manifest + service worker, lásd main.ts) -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#160f1c" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -30,7 +37,7 @@
         <span class="narration-ring" aria-hidden="true"></span>
         <span class="narration-ic" aria-hidden="true"></span>
       </button>
-      <div class="narration-label">Nim's Story</div>
+      <div class="narration-label" data-i18n="narration.label">Nim's Story</div>
       <div class="narration-hint" id="narrationHint">click to listen</div>
     </aside>
 
@@ -51,19 +58,20 @@
       <div id="menuGreet" class="menu-greet"></div>
 
       <nav class="menu-nav">
-        <button class="menu-link primary" data-action="start">Play</button>
-        <button class="menu-link" data-action="rank">Rank</button>
-        <button class="menu-link" data-action="settings">Settings</button>
-        <button class="menu-link" data-action="credits">Credits</button>
+        <button class="menu-link primary" data-action="start" data-i18n="nav.play">Play</button>
+        <button class="menu-link" data-action="rank" data-i18n="nav.rank">Rank</button>
+        <button class="menu-link" data-action="settings" data-i18n="nav.settings">Settings</button>
+        <button class="menu-link" data-action="credits" data-i18n="nav.credits">Credits</button>
+        <button class="menu-link" data-action="admin" data-dev-only>Admin</button>
       </nav>
     </div>
   </div>
 
   <!-- Szünet -->
   <div id="pause" class="overlay hidden">
-    <div class="title small">PAUSED</div>
-    <button class="btn" data-action="resume">RESUME</button>
-    <button class="btn" data-action="menu">QUIT</button>
+    <div class="title small" data-i18n="pause.title">PAUSED</div>
+    <button class="btn" data-action="resume" data-i18n="pause.resume">RESUME</button>
+    <button class="btn" data-action="menu" data-i18n="pause.quit">QUIT</button>
   </div>
 
   <!-- Skill-tárgy felvétele: megerősítő ablak a leírással -->
@@ -75,7 +83,7 @@
       <div class="offer-sub" id="offerSub"></div>
       <div class="offer-actions">
         <button class="btn" data-action="offer-accept" id="offerAccept">BUY</button>
-        <button class="btn small ghost" data-action="offer-decline" id="offerDecline">CANCEL</button>
+        <button class="btn small ghost" data-action="offer-decline" id="offerDecline" data-i18n="common.cancel">CANCEL</button>
       </div>
     </div>
   </div>
@@ -87,21 +95,21 @@
     <canvas id="goMedal" class="go-medal hidden" width="104" height="104" aria-hidden="true"></canvas>
     <div class="gameover-rank" id="finalRank"></div>
     <div class="gameover-best" id="finalBest"></div>
-    <button class="btn" data-action="start">RETRY</button>
-    <button class="btn" data-action="menu">MAIN MENU</button>
+    <button class="btn" data-action="start" data-i18n="gameover.retry">RETRY</button>
+    <button class="btn" data-action="menu" data-i18n="gameover.mainMenu">MAIN MENU</button>
   </div>
 
   <!-- Karakternév bekérő modal -->
   <div id="nameModal" class="overlay hidden">
     <div class="offer-card">
-      <div class="offer-badge">🧑 CHARACTER</div>
+      <div class="offer-badge" data-i18n="name.badge">🧑 CHARACTER</div>
       <div class="offer-title" id="nameModalTitle">What's your name, adventurer?</div>
-      <div class="offer-desc">You'll appear on the leaderboard under this name.</div>
-      <input id="nameInput" class="name-input" maxlength="12" placeholder="Character name" autocomplete="off" />
-      <div class="name-rule">Letters and numbers only · max 12 · no spaces</div>
+      <div class="offer-desc" data-i18n="name.desc">You'll appear on the leaderboard under this name.</div>
+      <input id="nameInput" class="name-input" maxlength="12" placeholder="Character name" data-i18n-ph="name.placeholder" autocomplete="off" />
+      <div class="name-rule" data-i18n="name.rule">Letters and numbers only · max 12 · no spaces</div>
       <div class="offer-actions">
-        <button class="btn" id="nameSave">GO</button>
-        <button class="btn ghost hidden" id="nameCancel">CANCEL</button>
+        <button class="btn" id="nameSave" data-i18n="common.go">GO</button>
+        <button class="btn ghost hidden" id="nameCancel" data-i18n="common.cancel">CANCEL</button>
       </div>
     </div>
   </div>
@@ -109,9 +117,9 @@
   <!-- RANG: teljes képernyős, admin-kinézetű lap -->
   <div id="rank" class="overlay sheetpage hidden">
     <div class="admin-bar">
-      <span class="admin-title">🏅 RANK</span>
+      <span class="admin-title" data-i18n="header.rank">🏅 RANK</span>
       <div class="admin-tabs" id="rankTabs"></div>
-      <button class="btn small" data-action="menu">← BACK</button>
+      <button class="btn small" data-action="menu" data-i18n="common.back">← BACK</button>
     </div>
     <div id="rankBody" class="page-body"></div>
   </div>
@@ -119,9 +127,9 @@
   <!-- BEÁLLÍTÁSOK: teljes képernyős, admin-kinézetű lap -->
   <div id="settings" class="overlay sheetpage hidden">
     <div class="admin-bar">
-      <span class="admin-title">⚙ SETTINGS</span>
+      <span class="admin-title" data-i18n="header.settings">⚙ SETTINGS</span>
       <div class="admin-tabs" id="settingsTabs"></div>
-      <button class="btn small" data-action="menu">← BACK</button>
+      <button class="btn small" data-action="menu" data-i18n="common.back">← BACK</button>
     </div>
     <div id="settingsBody" class="page-body"></div>
   </div>
@@ -129,6 +137,26 @@
   <!-- KÖZREMŰKÖDŐK: a főmenü hangulatában (nem admin-lap) -->
   <div id="credits" class="overlay credits-screen hidden">
     <div id="creditsBody" class="credits-inner"></div>
+  </div>
+
+  <!-- Admin · map viewer (csak dev) -->
+  <div id="admin" class="overlay admin hidden">
+    <div class="admin-bar">
+      <span class="admin-title">🛠 ADMIN</span>
+      <div class="admin-tabs">
+        <button class="btn small" data-action="admin-map" id="adminTabMap">🗺 MAP</button>
+        <button class="btn small" data-action="admin-enemy" id="adminTabEnemy">👹 ENEMY</button>
+        <button class="btn small" data-action="admin-boss" id="adminTabBoss">👑 BOSS</button>
+        <button class="btn small" data-action="admin-item" id="adminTabItem">💎 PERK</button>
+        <button class="btn small" data-action="admin-skill" id="adminTabSkill">✨ SKILL</button>
+        <button class="btn small" data-action="admin-odds" id="adminTabOdds">🎁 ZSÁKMÁNY</button>
+        <button class="btn small" data-action="admin-balance" id="adminTabBalance">⚖ BALANSZ</button>
+        <button class="btn small" data-action="admin-settings" id="adminTabSettings">⚙ BEÁLLÍTÁSOK</button>
+      </div>
+      <button class="btn small" data-action="menu">← VISSZA</button>
+    </div>
+    <!-- DOM-alapú admin lapok ide mountolódnak (a fül-sor alatt) -->
+    <div id="adminBody" class="hidden"></div>
   </div>
 
   <!-- Mobil érintővezérlés -->

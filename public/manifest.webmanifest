@@ -1,0 +1,21 @@
+{
+  "name": "Sentex: The Cellar",
+  "short_name": "Sentex",
+  "description": "Felülnézetes roguelike - saját Canvas-motor, procedurális grafika.",
+  "lang": "hu",
+  "start_url": ".",
+  "scope": ".",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#160f1c",
+  "theme_color": "#160f1c",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

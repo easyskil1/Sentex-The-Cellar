@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  ENRAGER — felhergelő dühdémon, izzó erekkel; üvöltéskor (active)
@@ -59,10 +59,7 @@ export function drawEnrager(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // izmos test (lüktet)
-  const g = ctx.createRadialGradient(-r * 0.25, -r * 0.3, r * 0.15, 0, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, darken(v.col, 0.4));
+  const g = radial3(ctx, -r * 0.25, -r * 0.3, r * 0.15, 0, 0, r, 0.5, light, body, darken(v.col, 0.4));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;

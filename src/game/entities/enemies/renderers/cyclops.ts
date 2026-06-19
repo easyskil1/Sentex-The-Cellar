@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial2, linear3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  CYCLOPS — egyszemű húsóriás bunkó-ököllel; szikla-vetéskor (active)
@@ -38,9 +38,7 @@ export function drawCyclops(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
     ctx.moveTo(r * 0.5, -r * 0.3);
     ctx.lineTo(r * 0.5, -r * 1.0);
     ctx.stroke();
-    const rock = ctx.createRadialGradient(r * 0.4, -r * 1.2, r * 0.1, r * 0.5, -r * 1.1, r * 0.5);
-    rock.addColorStop(0, '#9a8a76');
-    rock.addColorStop(1, '#4a4036');
+    const rock = radial2(ctx, r * 0.4, -r * 1.2, r * 0.1, r * 0.5, -r * 1.1, r * 0.5, '#9a8a76', '#4a4036');
     ctx.fillStyle = rock;
     ctx.strokeStyle = '#2a241c';
     ctx.lineWidth = 2;
@@ -56,10 +54,7 @@ export function drawCyclops(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // izmos törzs
-  const g = ctx.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, darken(v.col, 0.34));
+  const g = linear3(ctx, 0, -r, 0, r, 0.5, light, body, darken(v.col, 0.34));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.8;

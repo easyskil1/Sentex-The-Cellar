@@ -9,6 +9,8 @@
  * illeszkednek.
  */
 
+import { tc } from '../i18n';
+
 export interface RankTuning {
   /** A küszöb-rés mértani szorzója — a fő hangoló-paraméter (nagyobb = meredekebb). */
   growth: number;
@@ -91,9 +93,11 @@ export function bandInfo(band: Band): { label: string; icon: string } {
 }
 
 export function rankName(n: number): string {
-  if (n <= 0) return ROOKIE_NAME;
-  if (n >= MAX_RANK) return LEGEND_NAME;
-  return RANK_NAMES[Math.min(RANK_NAMES.length - 1, Math.floor((n - 1) / 10))]!;
+  const en =
+    n <= 0 ? ROOKIE_NAME
+    : n >= MAX_RANK ? LEGEND_NAME
+    : RANK_NAMES[Math.min(RANK_NAMES.length - 1, Math.floor((n - 1) / 10))]!;
+  return tc(en, `rank.name.${en}`);
 }
 
 export interface RankInfo {

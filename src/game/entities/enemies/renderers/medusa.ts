@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear2 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  MEDUSA — gorgó kígyó-hajjal: tekergő kígyók a fej körül, izzó tekintet;
@@ -65,9 +65,7 @@ export function drawMedusa(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   }
 
   // felsőtest / váll
-  const g = ctx.createLinearGradient(0, -r * 0.3, 0, r);
-  g.addColorStop(0, skin);
-  g.addColorStop(1, darken(v.col, 0.3));
+  const g = linear2(ctx, 0, -r * 0.3, 0, r, skin, darken(v.col, 0.3));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;

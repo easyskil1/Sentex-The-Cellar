@@ -252,6 +252,17 @@ export class Player {
       fire(a);
     }
     world.audio.shoot();
+
+    // ---- Játékérzet (Fázis A): csőtorkolat-villanás + visszarúgás + kamera-kick ----
+    // Tisztán élmény-réteg, kapcsolható (Beállítások · Grafika). A `dt`-t NEM
+    // érinti, így nincs teljesítmény-kockázat (szemben a hit-stoppal).
+    if (world.gameFeel) {
+      const mx = this.x + dir.x * 16, my = this.y + dir.y * 16;
+      world.particles.spawn(mx, my, tearCol ?? '#ffe9b0', 4, 90, 0.16); // #67 villanás
+      this.vx -= dir.x * 26;                  // #66 enyhe visszarúgás
+      this.vy -= dir.y * 26;
+      world.addKick(-dir.x, -dir.y, 1.8);     // #70 kamera-kick (a lövés ellen)
+    }
   }
 
   /** Irányítás-zavar bekapcsolása (a Zavaró ellenfél hívja). */

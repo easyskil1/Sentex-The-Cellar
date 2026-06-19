@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear2, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  SHOTGUNNER — testes zsoldos-lény két nagy duplacsövű "öklével";
@@ -45,9 +45,7 @@ export function drawShotgunner(ctx: CanvasRenderingContext2D, v: EnemyVisual): v
   ctx.fill();
   ctx.stroke();
   // két cső
-  const gun = ctx.createLinearGradient(0, -r * 0.3, 0, r * 0.3);
-  gun.addColorStop(0, lighten(metal, 0.3));
-  gun.addColorStop(1, '#2c2a24');
+  const gun = linear2(ctx, 0, -r * 0.3, 0, r * 0.3, lighten(metal, 0.3), '#2c2a24');
   for (const sgn of [-1, 1]) {
     ctx.fillStyle = v.flash ? '#fff' : gun;
     ctx.strokeStyle = '#1a1813';
@@ -66,10 +64,7 @@ export function drawShotgunner(ctx: CanvasRenderingContext2D, v: EnemyVisual): v
   ctx.restore();
 
   // test (zömök páncél)
-  const g = ctx.createLinearGradient(0, -r, 0, r * 0.9);
-  g.addColorStop(0, light);
-  g.addColorStop(0.55, body);
-  g.addColorStop(1, darken(v.col, 0.32));
+  const g = linear3(ctx, 0, -r, 0, r * 0.9, 0.55, light, body, darken(v.col, 0.32));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;

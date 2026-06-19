@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  GOLEM — agyag/kő-kolosszus tömbkarokkal és izzó maggal a mellkasban;
@@ -60,10 +60,7 @@ export function drawGolem(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   }
 
   // törzs (kő-tömb)
-  const g = ctx.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, darken(v.col, 0.36));
+  const g = linear3(ctx, 0, -r, 0, r, 0.5, light, body, darken(v.col, 0.36));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 3;

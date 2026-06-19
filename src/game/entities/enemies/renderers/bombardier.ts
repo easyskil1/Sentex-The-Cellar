@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, linear3, radial2 } from './helpers';
 
 /* ===================================================================== *
  *  BOMBARDIER — páncélos bogár-gólem, hátán ketyegő aknával
@@ -37,10 +37,7 @@ export function drawBombardier(ctx: CanvasRenderingContext2D, v: EnemyVisual): v
   }
 
   // páncélozott test
-  const g = ctx.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.55, body);
-  g.addColorStop(1, darken(v.col, 0.35));
+  const g = linear3(ctx, 0, -r, 0, r, 0.55, light, body, darken(v.col, 0.35));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;
@@ -60,9 +57,7 @@ export function drawBombardier(ctx: CanvasRenderingContext2D, v: EnemyVisual): v
 
   // hátára szerelt akna (fémgömb + gyújtózsinór, aktívkor világít)
   const mineY = -r * 0.55;
-  const mg = ctx.createRadialGradient(-r * 0.1, mineY - r * 0.15, 1, 0, mineY, r * 0.42);
-  mg.addColorStop(0, lighten(metal, 0.4));
-  mg.addColorStop(1, '#2a2620');
+  const mg = radial2(ctx, -r * 0.1, mineY - r * 0.15, 1, 0, mineY, r * 0.42, lighten(metal, 0.4), '#2a2620');
   ctx.fillStyle = v.flash ? '#fff' : mg;
   ctx.strokeStyle = '#15120c';
   ctx.lineWidth = 2;

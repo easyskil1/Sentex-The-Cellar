@@ -1,6 +1,7 @@
 import { TAU, rand, pick, shade } from '../../engine/math';
 import type { Item } from '../content/items';
-import { pillLook, rollItem } from '../content/items';
+import { pillLook, rollItem, itemName, itemDesc } from '../content/items';
+import { tc } from '../../i18n';
 import { drawPill } from '../content/Pill';
 import { drawBombIcon, drawHeart } from './Pickup';
 import { itemPrice, consumablePrice, rerollPrice, GAMBLE_COST, type ConsumableKind } from '../content/shopPricing';
@@ -33,9 +34,14 @@ const CONS_DESC: Record<ConsumableKind, string> = {
 /** Egy ajánlat neve/leírása/színe a felugró ablakhoz. */
 export function offerView(offer: StallOffer): { name: string; desc: string; color: string } {
   if (offer.kind === 'item') {
-    return { name: offer.item.name, desc: offer.item.desc, color: offer.item.col };
+    return { name: itemName(offer.item), desc: itemDesc(offer.item), color: offer.item.col };
   }
-  return { name: CONS_NAME[offer.cons], desc: CONS_DESC[offer.cons], color: CONS_COL[offer.cons] };
+  const k = offer.cons;
+  return {
+    name: tc(CONS_NAME[k], `cons.${k}.name`),
+    desc: tc(CONS_DESC[k], `cons.${k}.desc`),
+    color: CONS_COL[k],
+  };
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial2, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  CHILLER — sápadt kék jégszellem, kristálytüskékkel és fagyos aurával
@@ -19,9 +19,7 @@ export function drawChiller(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   if (v.active) {
     ctx.save();
     ctx.globalAlpha = 0.18 + Math.sin(v.wob * 4) * 0.05;
-    const aura = ctx.createRadialGradient(v.x, v.y + float, r * 0.5, v.x, v.y + float, r * 2.6);
-    aura.addColorStop(0, '#cdeefa');
-    aura.addColorStop(1, 'rgba(120,200,230,0)');
+    const aura = radial2(ctx, v.x, v.y + float, r * 0.5, v.x, v.y + float, r * 2.6, '#cdeefa', 'rgba(120,200,230,0)');
     ctx.fillStyle = aura;
     ctx.beginPath();
     ctx.arc(v.x, v.y + float, r * 2.6, 0, TAU);
@@ -64,10 +62,7 @@ export function drawChiller(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // jeges test (áttetsző gömb)
-  const g = ctx.createRadialGradient(-r * 0.25, -r * 0.3, r * 0.1, 0, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.65, body);
-  g.addColorStop(1, darken(v.col, 0.25));
+  const g = radial3(ctx, -r * 0.25, -r * 0.3, r * 0.1, 0, 0, r, 0.65, light, body, darken(v.col, 0.25));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.2;

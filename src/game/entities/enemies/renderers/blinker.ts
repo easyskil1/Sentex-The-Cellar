@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  BLINKER — fázis-szellem: rendesen áttetsző lila lidérc nagy szemmel;
@@ -44,10 +44,7 @@ export function drawBlinker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   ctx.lineCap = 'round';
 
   // alul szétfoszló energia-üstök
-  const g = ctx.createLinearGradient(0, -r, 0, r * 1.2);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, 'rgba(42,26,74,0)');
+  const g = linear3(ctx, 0, -r, 0, r * 1.2, 0.6, light, body, 'rgba(42,26,74,0)');
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2;

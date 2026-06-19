@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  MORTAR — zömök, megvetett tüzér-gólem, hátán ferdén felfelé álló
@@ -33,10 +33,7 @@ export function drawMortar(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.save();
   ctx.translate(-r * 0.1, -r * 0.5);
   ctx.rotate(-0.5 - recoil * 0.12);
-  const tube = ctx.createLinearGradient(-r * 0.3, 0, r * 0.3, 0);
-  tube.addColorStop(0, '#34302a');
-  tube.addColorStop(0.5, metal);
-  tube.addColorStop(1, '#2a2620');
+  const tube = linear3(ctx, -r * 0.3, 0, r * 0.3, 0, 0.5, '#34302a', metal, '#2a2620');
   ctx.fillStyle = v.flash ? '#fff' : tube;
   ctx.strokeStyle = '#1a1712';
   ctx.lineWidth = 2;
@@ -81,10 +78,7 @@ export function drawMortar(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.restore();
 
   // testpáncél (széles, alacsony)
-  const g = ctx.createLinearGradient(0, -r * 0.8, 0, r * 0.9);
-  g.addColorStop(0, light);
-  g.addColorStop(0.55, body);
-  g.addColorStop(1, darken(v.col, 0.32));
+  const g = linear3(ctx, 0, -r * 0.8, 0, r * 0.9, 0.55, light, body, darken(v.col, 0.32));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;

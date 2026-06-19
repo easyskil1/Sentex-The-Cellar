@@ -1,9 +1,12 @@
 /**
- * Közös DOM-UI építőelemek a teljes képernyős lapokhoz (RANG, BEÁLLÍTÁSOK).
- * Tisztán DOM, hogy egységes, letisztult felület legyen.
+ * Közös admin-UI építőelemek (Fázis 0).
+ *
+ * Minden admin lap EZEKBŐL épül, hogy egységes, letisztult, „eszköz"-jellegű
+ * (nem játékos-grafikus) felület legyen. Tisztán DOM — a régi canvas-rajzolású
+ * viewereket fokozatosan ezek váltják fel (lásd ADMIN_TEENDOK.md).
  */
 
-/** Egy DOM-alapú lap életciklusa (mount/unmount). */
+/** Egy DOM-alapú admin lap életciklusa (a Game mountolja/unmountolja). */
 export interface AdminPanel {
   /** Felépíti és beilleszti a tartalmát a megadott konténerbe. */
   mount(host: HTMLElement): void;

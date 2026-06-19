@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, shadow } from './helpers';
+import { lighten, shadow, linear2, radial2 } from './helpers';
 
 /* ===================================================================== *
  *  FLY — lila, zümmögő szúnyog/szellem-bogár, csapkodó szárnyakkal
@@ -50,10 +50,7 @@ export function drawFly(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   }
 
   // potroh (hátsó, hosszúkás szegmens)
-  const abGrad = ctx.createLinearGradient(0, -r * 0.3, 0, r * 0.8);
-  abGrad.addColorStop(0, light);
-  abGrad.addColorStop(1, body);
-  ctx.fillStyle = v.flash ? '#fff' : abGrad;
+  ctx.fillStyle = v.flash ? '#fff' : linear2(ctx, 0, -r * 0.3, 0, r * 0.8, light, body);
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.2;
   ctx.beginPath();
@@ -70,10 +67,7 @@ export function drawFly(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   }
 
   // fej (gömb)
-  const headGrad = ctx.createRadialGradient(-r * 0.15, -r * 0.55, r * 0.1, 0, -r * 0.35, r * 0.7);
-  headGrad.addColorStop(0, light);
-  headGrad.addColorStop(1, body);
-  ctx.fillStyle = v.flash ? '#fff' : headGrad;
+  ctx.fillStyle = v.flash ? '#fff' : radial2(ctx, -r * 0.15, -r * 0.55, r * 0.1, 0, -r * 0.35, r * 0.7, light, body);
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.2;
   ctx.beginPath();

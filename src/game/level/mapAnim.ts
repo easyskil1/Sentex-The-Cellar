@@ -8,8 +8,10 @@
  * folytonosan, ugráLásmentesen animál bármekkora méretben. Magát a téglalapra
  * vágást is elvégzi.
  *
- * Egyelőre ELŐNÉZETEK (nincsenek élő pályára kötve) — a kiválasztottakat utólag
- * bekötjük a World rétegrendjébe.
+ * Élő pályára kötve két úton: (1) egy sablon anim-jele (1-9, 0, *) az adott
+ * szobára teszi, (2) ha a sablon nem ad jelet, a fejezet-téma `ambient` mezője
+ * (lásd theme.ts / levels.ts) ad minden szobának egy alap-effektet. A World a
+ * render-rétegrendben az entitások fölött rajzolja (lásd World.render).
  */
 import type { Rect } from '../types';
 import { TAU, hash2, clamp } from '../../engine/math';

@@ -4,6 +4,7 @@ import { MAPS } from './maps';
 import { ensureChapterMaps } from './mapStore';
 import { CHAPTER_OVERRIDES } from './chapterOverrides';
 import { HARD_LABYRINTH, cloneLabyrinthConfig, type LabyrinthConfig } from './labyrinth';
+import { tc } from '../../i18n';
 
 /**
  * Fejezet = egy „világ" több szinttel. Minden fejezetnek saját
@@ -71,6 +72,7 @@ const THEME_PINCE: Theme = {
   wall: '#3a2c20', wallEdge: '#1a120c', wallTop: 'rgba(255,220,170,0.05)',
   doorFrame: '#1a120c', doorFloor: '#241d2a', doorBar: '#5a4030', doorBarStroke: '#2a1d12',
   rock: '#5a5260', rockStroke: '#2a2630', bossColor: '#9c4bd8', accent: '#f0c878',
+  ambient: '88', // szentjánosbogarak: pislákoló élet a nyirkos sötétben
 };
 
 const THEME_UREG: Theme = {
@@ -79,6 +81,7 @@ const THEME_UREG: Theme = {
   doorFrame: '#0f1a14', doorFloor: '#1b2a24', doorBar: '#356050', doorBarStroke: '#16302a',
   rock: '#4a5a54', rockStroke: '#243029', bossColor: '#3fd8a0', accent: '#8fe0c0',
   decorations: ['#2d4a3e', '#3a5a4a', '#8fe0c0'], // Indák, fű, moha színei
+  ambient: '**', // mérgező spórák: az „élő barlang" lélegzik (lásd sztori)
 };
 
 const THEME_MELYSEG: Theme = {
@@ -87,6 +90,7 @@ const THEME_MELYSEG: Theme = {
   doorFrame: '#120f1f', doorFloor: '#1d1b2e', doorBar: '#453d66', doorBarStroke: '#221d38',
   rock: '#4a4560', rockStroke: '#262238', bossColor: '#ff5b8a', accent: '#b8a0ff',
   decorations: ['#2a2440', '#3a2d5a', '#ff5b8a'], // Kristályok, sötét kövek színei
+  ambient: '55', // köd: mélységi homály, csökkent láthatóság
 };
 
 // Holtak városa — vörös-csont-fekete, fáklyafényes kripta.
@@ -96,6 +100,7 @@ const THEME_NECRO: Theme = {
   doorFrame: '#1a0a0a', doorFloor: '#241016', doorBar: '#6a2828', doorBarStroke: '#2a1010',
   rock: '#5a4a4a', rockStroke: '#2a2020', bossColor: '#ff3b3b', accent: '#e0a890',
   decorations: ['#3a1a1a', '#5a2828', '#e0a890'], // Sírkövek, vér, csont árnyalatai
+  ambient: '44', // parázs szállás: fáklyafény szikrái a kriptában
 };
 
 // Sárkányfészek — arany-tűz-fekete, izzó parázzsal.
@@ -105,6 +110,7 @@ const THEME_LAIR: Theme = {
   doorFrame: '#1a1208', doorFloor: '#241a10', doorBar: '#7a5424', doorBarStroke: '#3a2810',
   rock: '#5a4e3a', rockStroke: '#2a2418', bossColor: '#ff8030', accent: '#f0a830',
   decorations: ['#3a2a14', '#6a4420', '#f0a830'], // Arany, parázs, kristály színei
+  ambient: '00', // hamueső: vulkáni, fojtott légkör a sárkányfészekben
 };
 
 /** A választható téma-alapok (új fejezet ezek egyikének kinézetét örökli). */
@@ -418,6 +424,18 @@ export interface ResolvedLevel {
 /** Csak a `fejezet` kategóriás (kampány) világok — EZEK adják a globális ívet. */
 export function campaignChapters(): Chapter[] {
   return CHAPTERS.filter((c) => c.category === 'fejezet');
+}
+
+/** A fejezet megjelenítendő neve a jelenlegi nyelven (az `id` a stabil kulcs; a
+ *  felhasználó által létrehozott/átnevezett fejezeteknél nincs HU kulcs → az
+ *  eredeti név marad). */
+export function chapterName(ch: Chapter): string {
+  return tc(ch.name, `chapter.${ch.id}.name`);
+}
+
+/** A fejezet boss-ának megjelenítendő neve a jelenlegi nyelven (boss-introhoz). */
+export function chapterBossName(ch: Chapter): string {
+  return tc(ch.bossName, `chapter.${ch.id}.boss`);
 }
 
 /**

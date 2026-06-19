@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken } from './helpers';
+import { lighten, darken, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  LEAPER — szöcske/béka-szerű ugró erős hátsó lábakkal; töltéskor
@@ -65,10 +65,7 @@ export function drawLeaper(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   }
 
   // test
-  const g = ctx.createRadialGradient(-r * 0.2, -r * 0.3, r * 0.1, 0, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, darken(v.col, 0.3));
+  const g = radial3(ctx, -r * 0.2, -r * 0.3, r * 0.1, 0, 0, r, 0.6, light, body, darken(v.col, 0.3));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { darken, shadow, glow } from './helpers';
+import { darken, shadow, glow, radial2 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  SKELETON — koponya + bordák + csont-végtagok; csontnyíl-lövéskor
@@ -66,9 +66,7 @@ export function drawSkeleton(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   }
 
   // koponya
-  const sg = ctx.createRadialGradient(-r * 0.12, -r * 0.55, r * 0.1, 0, -r * 0.45, r * 0.55);
-  sg.addColorStop(0, '#fff');
-  sg.addColorStop(1, bone);
+  const sg = radial2(ctx, -r * 0.12, -r * 0.55, r * 0.1, 0, -r * 0.45, r * 0.55, '#fff', bone);
   ctx.fillStyle = v.flash ? '#fff' : sg;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2;

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear2, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  GUNNER — fürge gépkarú lövész forgócsöves (minigun) karral;
@@ -41,10 +41,7 @@ export function drawGunner(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.save();
   ctx.rotate(look);
   // tok
-  const housing = ctx.createLinearGradient(0, -r * 0.3, 0, r * 0.3);
-  housing.addColorStop(0, lighten(metal, 0.3));
-  housing.addColorStop(1, '#2a3038');
-  ctx.fillStyle = v.flash ? '#fff' : housing;
+  ctx.fillStyle = v.flash ? '#fff' : linear2(ctx, 0, -r * 0.3, 0, r * 0.3, lighten(metal, 0.3), '#2a3038');
   ctx.strokeStyle = '#181c20';
   ctx.lineWidth = 1.8;
   ctx.beginPath();
@@ -71,11 +68,7 @@ export function drawGunner(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.restore();
 
   // test (sima dróngömb)
-  const g = ctx.createRadialGradient(-r * 0.25, -r * 0.3, r * 0.1, 0, 0, r * 0.8);
-  g.addColorStop(0, light);
-  g.addColorStop(0.7, body);
-  g.addColorStop(1, darken(v.col, 0.32));
-  ctx.fillStyle = v.flash ? '#fff' : g;
+  ctx.fillStyle = v.flash ? '#fff' : radial3(ctx, -r * 0.25, -r * 0.3, r * 0.1, 0, 0, r * 0.8, 0.7, light, body, darken(v.col, 0.32));
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;
   ctx.beginPath();

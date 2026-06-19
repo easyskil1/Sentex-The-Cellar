@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, radial3, linear2 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  VAMPIRE — sápadt köpenyes alak, felálló gallérral és agyarakkal;
@@ -20,10 +20,7 @@ export function drawVampire(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   const auraR = r * 13;
   const tt = performance.now() / 1000;
   ctx.save();
-  const ag = ctx.createRadialGradient(v.x, v.y, auraR * 0.2, v.x, v.y, auraR);
-  ag.addColorStop(0, 'rgba(150,20,40,0.18)');
-  ag.addColorStop(0.7, 'rgba(110,12,30,0.1)');
-  ag.addColorStop(1, 'rgba(80,8,22,0)');
+  const ag = radial3(ctx, v.x, v.y, auraR * 0.2, v.x, v.y, auraR, 0.7, 'rgba(150,20,40,0.18)', 'rgba(110,12,30,0.1)', 'rgba(80,8,22,0)');
   ctx.fillStyle = ag;
   ctx.beginPath();
   ctx.arc(v.x, v.y, auraR, 0, TAU);
@@ -49,9 +46,7 @@ export function drawVampire(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   // köpeny-szárnyak (csapáskor széttárva, mint a denevérszárny)
   const spread = dash ? 1.0 : 0.4 + Math.sin(v.bob) * 0.05;
   for (const sgn of [-1, 1]) {
-    const wing = ctx.createLinearGradient(0, 0, sgn * r * 1.4, 0);
-    wing.addColorStop(0, v.flash ? '#fff' : body);
-    wing.addColorStop(1, v.flash ? '#fff' : darken(v.col, 0.5));
+    const wing = linear2(ctx, 0, 0, sgn * r * 1.4, 0, v.flash ? '#fff' : body, v.flash ? '#fff' : darken(v.col, 0.5));
     ctx.fillStyle = wing;
     ctx.strokeStyle = dark;
     ctx.lineWidth = 2;
@@ -73,9 +68,7 @@ export function drawVampire(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // test (köpeny-burok)
-  const g = ctx.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, lighten(v.col, 0.2));
-  g.addColorStop(1, darken(v.col, 0.4));
+  const g = linear2(ctx, 0, -r, 0, r, lighten(v.col, 0.2), darken(v.col, 0.4));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow, aura } from './helpers';
+import { lighten, darken, shadow, glow, aura, radial4 } from './helpers';
 
 /* ===================================================================== *
  *  PULLER — örvény-lidérc, lebegve maga felé szív; hatókörben (active)
@@ -55,11 +55,7 @@ export function drawPuller(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.restore();
 
   // központi test (sötét örvénymag, befelé sötétülő)
-  const g = ctx.createRadialGradient(0, 0, r * 0.05, 0, 0, r * 0.8);
-  g.addColorStop(0, '#0c0a20');
-  g.addColorStop(0.5, darken(v.col, 0.2));
-  g.addColorStop(0.8, body);
-  g.addColorStop(1, light);
+  const g = radial4(ctx, 0, 0, r * 0.05, 0, 0, r * 0.8, 0.5, 0.8, '#0c0a20', darken(v.col, 0.2), body, light);
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;

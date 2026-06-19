@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear2, radial3, radial2 } from './helpers';
 
 /* ===================================================================== *
  *  BOMBTHROWER — repülő dobász denevérszárnyakon, karmai közt ketyegő
@@ -24,9 +24,7 @@ export function drawBombthrower(ctx: CanvasRenderingContext2D, v: EnemyVisual): 
 
   // denevér-szárnyak (csapkodó, bordázott)
   for (const sgn of [-1, 1]) {
-    const wing = ctx.createLinearGradient(0, 0, sgn * r, 0);
-    wing.addColorStop(0, v.flash ? '#fff' : body);
-    wing.addColorStop(1, v.flash ? '#fff' : darken(v.col, 0.4));
+    const wing = linear2(ctx, 0, 0, sgn * r, 0, v.flash ? '#fff' : body, v.flash ? '#fff' : darken(v.col, 0.4));
     ctx.fillStyle = wing;
     ctx.strokeStyle = dark;
     ctx.lineWidth = 1.8;
@@ -52,10 +50,7 @@ export function drawBombthrower(ctx: CanvasRenderingContext2D, v: EnemyVisual): 
   }
 
   // test (kicsi, gömbölyded)
-  const g = ctx.createRadialGradient(-r * 0.2, -r * 0.3, r * 0.1, 0, 0, r * 0.7);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, darken(v.col, 0.32));
+  const g = radial3(ctx, -r * 0.2, -r * 0.3, r * 0.1, 0, 0, r * 0.7, 0.6, light, body, darken(v.col, 0.32));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.2;
@@ -100,9 +95,7 @@ export function drawBombthrower(ctx: CanvasRenderingContext2D, v: EnemyVisual): 
     ctx.stroke();
   }
   const mineY = r * 0.6 + grab;
-  const mg = ctx.createRadialGradient(-r * 0.08, mineY - r * 0.1, 1, 0, mineY, r * 0.3);
-  mg.addColorStop(0, lighten(metal, 0.4));
-  mg.addColorStop(1, '#2a2620');
+  const mg = radial2(ctx, -r * 0.08, mineY - r * 0.1, 1, 0, mineY, r * 0.3, lighten(metal, 0.4), '#2a2620');
   ctx.fillStyle = v.flash ? '#fff' : mg;
   ctx.strokeStyle = '#15120c';
   ctx.lineWidth = 1.8;

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, glow, aura } from './helpers';
+import { lighten, glow, aura, linear3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  WRAITH — csuklyás kísértet hideg aurában, alul szétfoszló lepellel
@@ -54,10 +54,7 @@ export function drawWraith(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
 
   // alul szétfoszló lepel
   const tatters = 7;
-  const g = ctx.createLinearGradient(0, -r, 0, r * 1.4);
-  g.addColorStop(0, light);
-  g.addColorStop(0.55, body);
-  g.addColorStop(1, 'rgba(26,36,48,0)');
+  const g = linear3(ctx, 0, -r, 0, r * 1.4, 0.55, light, body, 'rgba(26,36,48,0)');
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 1.6;

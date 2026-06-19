@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  LANCER — lila lebegő szentinel-szem, fókuszlencsével és energiasugárral
@@ -79,10 +79,7 @@ export function drawLancer(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   }
 
   // burkolat-gömb
-  const g = ctx.createRadialGradient(-r * 0.25, -r * 0.3, r * 0.1, 0, 0, r * 0.85);
-  g.addColorStop(0, light);
-  g.addColorStop(0.7, body);
-  g.addColorStop(1, darken(v.col, 0.35));
+  const g = radial3(ctx, -r * 0.25, -r * 0.3, r * 0.1, 0, 0, r * 0.85, 0.7, light, body, darken(v.col, 0.35));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;
@@ -102,10 +99,7 @@ export function drawLancer(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.ellipse(0, 0, r * 0.5, r * 0.42, look, 0, TAU);
   ctx.fill();
   // írisz
-  const iris = ctx.createRadialGradient(ex, ey, 1, ex, ey, r * 0.34);
-  iris.addColorStop(0, '#ffffff');
-  iris.addColorStop(0.4, `rgba(255,140,240,${0.5 + glow * 0.5})`);
-  iris.addColorStop(1, darken(v.col, 0.1));
+  const iris = radial3(ctx, ex, ey, 1, ex, ey, r * 0.34, 0.4, '#ffffff', `rgba(255,140,240,${0.5 + glow * 0.5})`, darken(v.col, 0.1));
   ctx.fillStyle = v.flash ? '#fff' : iris;
   ctx.beginPath();
   ctx.arc(ex, ey, r * 0.32, 0, TAU);

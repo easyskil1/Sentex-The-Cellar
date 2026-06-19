@@ -1,4 +1,5 @@
 import { TAU } from '../../engine/math';
+import { t as tr } from '../../i18n';
 import type { HubChoice } from '../World';
 import {
   drawGate,
@@ -64,7 +65,7 @@ export function drawHubTitle(ctx: CanvasRenderingContext2D, centerX: number, top
   ctx.shadowBlur = 6;
   ctx.fillStyle = '#e8d8b0';
   ctx.font = '700 26px Cinzel, Georgia, serif';
-  ctx.fillText('CHOOSE YOUR PATH', centerX, topY);
+  ctx.fillText(tr('hub.choose'), centerX, topY);
   ctx.shadowBlur = 0;
   ctx.textAlign = 'start';
   ctx.textBaseline = 'alphabetic';

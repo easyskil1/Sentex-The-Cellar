@@ -5,6 +5,7 @@
  * és nagyban (játék, görgetve), SOSEM összenyomva (a tile mindig négyzetes).
  */
 import { ROOM } from '../config';
+import { t as tr } from '../../i18n';
 import type { Rect } from '../types';
 import type { Theme } from './theme';
 import type { Labyrinth } from './labyrinth';
@@ -168,7 +169,7 @@ export function drawLabOverlay(ctx: CanvasRenderingContext2D, box: Rect, won: bo
   ctx.font = '600 14px system-ui, sans-serif';
   ctx.fillStyle = 'rgba(243, 226, 191, 0.85)';
   ctx.textAlign = 'center';
-  ctx.fillText('WASD: move · shoot · ESC: back · find the ▼ exit', box.x + box.w / 2, box.y + box.h + 22);
+  ctx.fillText(tr('lab.controls'), box.x + box.w / 2, box.y + box.h + 22);
   ctx.textAlign = 'start';
 
   if (won) {
@@ -179,7 +180,7 @@ export function drawLabOverlay(ctx: CanvasRenderingContext2D, box: Rect, won: bo
     ctx.fillStyle = '#3fd87a';
     ctx.font = '800 42px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('LABYRINTH COMPLETE!', cx, cy - 8);
+    ctx.fillText(tr('lab.complete'), cx, cy - 8);
     ctx.textAlign = 'start';
   }
   ctx.restore();

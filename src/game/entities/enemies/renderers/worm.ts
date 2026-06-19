@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial2, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  WORM — gilista: a föld alatt (buried) csak feltüremlő földpúp + repedés
@@ -18,9 +18,7 @@ export function drawWorm(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
     ctx.save();
     ctx.translate(v.x, v.y);
     // földpúp
-    const mound = ctx.createRadialGradient(0, -r * 0.1, r * 0.2, 0, 0, r * 1.1);
-    mound.addColorStop(0, '#6b4a30');
-    mound.addColorStop(1, 'rgba(58,38,22,0)');
+    const mound = radial2(ctx, 0, -r * 0.1, r * 0.2, 0, 0, r * 1.1, '#6b4a30', 'rgba(58,38,22,0)');
     ctx.fillStyle = mound;
     ctx.beginPath();
     ctx.ellipse(0, 0, r * 1.1, r * 0.6, 0, 0, TAU);
@@ -75,10 +73,7 @@ export function drawWorm(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
     const sy = -r * 0.7 + t * r * 1.5; // fej fent, farok lent
     const sway = Math.sin(v.wob * 2 + t * 3) * r * 0.18 * t;
     const sr = r * (0.78 - t * 0.32);
-    const seg = ctx.createRadialGradient(sway - sr * 0.3, sy - sr * 0.3, sr * 0.2, sway, sy, sr);
-    seg.addColorStop(0, light);
-    seg.addColorStop(0.6, body);
-    seg.addColorStop(1, darken(v.col, 0.35));
+    const seg = radial3(ctx, sway - sr * 0.3, sy - sr * 0.3, sr * 0.2, sway, sy, sr, 0.6, light, body, darken(v.col, 0.35));
     ctx.fillStyle = v.flash ? '#fff' : seg;
     ctx.strokeStyle = dark;
     ctx.lineWidth = 2;

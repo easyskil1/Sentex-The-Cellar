@@ -36,6 +36,12 @@ export class Input {
   /** Jobb alsó virtuális joystick (lövés). */
   private readonly shootStick = { dx: 0, dy: 0, active: false };
 
+  /** Gamepad bal/jobb stick (poll-alapú, a Gamepad API maga is poll). */
+  private readonly padMove = { dx: 0, dy: 0, active: false };
+  private readonly padAim = { dx: 0, dy: 0, active: false };
+  /** Az előző képkocka gamepad-gombállapota (felfutó él-detektáláshoz). */
+  private readonly prevPadButtons: boolean[] = [];
+
   /** Szünet-billentyű lenyomás eseménye (egyszer fogyasztható). */
   private pauseRequested = false;
   private skillRequested = false;
@@ -173,6 +179,10 @@ export class Input {
       x += this.moveStick.dx;
       y += this.moveStick.dy;
     }
+    if (this.padMove.active) {
+      x += this.padMove.dx;
+      y += this.padMove.dy;
+    }
     const m = Math.hypot(x, y);
     return m > 1 ? { x: x / m, y: y / m } : { x, y };
   }
@@ -189,7 +199,44 @@ export class Input {
       x = this.shootStick.dx;
       y = this.shootStick.dy;
     }
+    if (this.padAim.active && (Math.abs(this.padAim.dx) > 0.3 || Math.abs(this.padAim.dy) > 0.3)) {
+      x = this.padAim.dx;
+      y = this.padAim.dy;
+    }
     return { x, y };
+  }
+
+  /**
+   * Gamepad-poll: a Gamepad API maga is poll-alapú → nincs új eseménykezelő. A
+   * Game frame-enként egyszer hívja, az input-getterek olvasása ELŐTT. Bal stick
+   * = mozgás, jobb stick = célzás+lövés (twin-stick); gombok = a meglévő akciók
+   * (standard mapping). Csak az első csatlakozott padet kezeli.
+   */
+  pollGamepad(): void {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let pad: Gamepad | null = null;
+    for (const p of pads) { if (p && p.connected) { pad = p; break; } }
+    if (!pad) { this.padMove.active = false; this.padAim.active = false; return; }
+
+    const DEAD = 0.25;
+    const lx = pad.axes[0] ?? 0, ly = pad.axes[1] ?? 0;
+    if (Math.hypot(lx, ly) > DEAD) { this.padMove.dx = lx; this.padMove.dy = ly; this.padMove.active = true; }
+    else this.padMove.active = false;
+    const rx = pad.axes[2] ?? 0, ry = pad.axes[3] ?? 0;
+    if (Math.hypot(rx, ry) > DEAD) { this.padAim.dx = rx; this.padAim.dy = ry; this.padAim.active = true; }
+    else this.padAim.active = false;
+
+    // Egyszeri akciók felfutó éllel. Mapping: Start=szünet, A=skill, B=bomba, Y=TNT.
+    const edge = (i: number): boolean => {
+      const now = pad!.buttons[i]?.pressed ?? false;
+      const was = this.prevPadButtons[i] ?? false;
+      this.prevPadButtons[i] = now;
+      return now && !was;
+    };
+    if (edge(9)) this.pauseRequested = true;
+    if (edge(0)) this.skillRequested = true;
+    if (edge(1)) this.bombRequested = true;
+    if (edge(3)) this.tntRequested = true;
   }
 
   private setupTouch(): void {

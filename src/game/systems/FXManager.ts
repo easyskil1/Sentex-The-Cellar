@@ -1,6 +1,6 @@
 import type { Floater } from '../types';
 import { rand, clamp } from '../../engine/math';
-import { loadShake } from '../settings';
+import { loadShake, loadGameFeel } from '../settings';
 
 /**
  * Effekt-réteg: lebegő szövegek (státusz + sebzésszámok) és a képernyőrázás.
@@ -15,6 +15,36 @@ export class FXManager {
   shake = 0;
   /** Felhasználói rázás-szorzó (0 = kikapcsolva, 1 = teljes) - a Beállítások állítja. */
   shakeScale = loadShake();
+  /** „Játékérzet"-effektek kapcsolója (csőtorkolat-villanás, visszarúgás, kamera-kick). */
+  gameFeel = loadGameFeel();
+  /** Kamera-kick eltolás (lövéskor a lövés ELLEN rúg, majd visszalendül). */
+  kickX = 0;
+  kickY = 0;
+
+  /** Game-feel kapcsoló (Beállítások · Grafika); kikapcsoláskor a kick lecseng. */
+  setGameFeel(v: boolean): void {
+    this.gameFeel = v;
+    if (!v) { this.kickX = 0; this.kickY = 0; }
+  }
+
+  /**
+   * Kamera-kick: rövid eltolás `(dirX,dirY)` irányba, `amount` erővel. A lövés
+   * a `shoot` ELLEN irányba rúg (lásd Player.shoot). Csak ha a game-feel BE van.
+   */
+  addKick(dirX: number, dirY: number, amount: number): void {
+    if (!this.gameFeel) return;
+    this.kickX = clamp(this.kickX + dirX * amount, -10, 10);
+    this.kickY = clamp(this.kickY + dirY * amount, -10, 10);
+  }
+
+  /** A teljes kamera-eltolás X-ben: rázás-jitter + kick (a render olvassa). */
+  camOffX(): number {
+    return (this.shake > 0 ? rand(-this.shake, this.shake) * 0.5 : 0) + this.kickX;
+  }
+  /** A teljes kamera-eltolás Y-ban: rázás-jitter + kick. */
+  camOffY(): number {
+    return (this.shake > 0 ? rand(-this.shake, this.shake) * 0.5 : 0) + this.kickY;
+  }
 
   /** Új futás / mód-váltás: a lebegő szövegek törlése. */
   clear(): void {
@@ -77,9 +107,17 @@ export class FXManager {
     this.tickShake(dt);
   }
 
-  /** Csak a képernyőrázás lecsengése (szünet/menü alatt — a szövegek fagynak). */
+  /** Csak a képernyőrázás + kamera-kick lecsengése (szünet/menü alatt is). */
   tickShake(dt: number): void {
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 38);
+    // kick: gyors, rugós visszalendülés a nyugalmi (0) felé
+    if (this.kickX !== 0 || this.kickY !== 0) {
+      const decay = Math.max(0, 1 - dt * 16);
+      this.kickX *= decay;
+      this.kickY *= decay;
+      if (Math.abs(this.kickX) < 0.05) this.kickX = 0;
+      if (Math.abs(this.kickY) < 0.05) this.kickY = 0;
+    }
   }
 
   /** Lebegő szövegek kirajzolása (sebzésszám pop+kontúr, egyéb státusz halványuló). */

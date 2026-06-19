@@ -6,6 +6,8 @@
  * lüktető fény-mag, körülötte keringő szikrák, és egy rúna-tárcsa perem (kettős
  * gyűrű + rovátkák) a fejezet kiemelő-színében. Alatta a cél felirata.
  */
+import { t as tr } from '../../i18n';
+
 export function drawGate(
   ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, accent: string, t: number,
 ): void {
@@ -115,7 +117,7 @@ export function drawGate(
   ctx.shadowColor = 'rgba(0,0,0,0.9)';
   ctx.shadowBlur = 4;
   ctx.fillStyle = accent;
-  ctx.fillText('LABYRINTH', cx, cy + r * 1.35);
+  ctx.fillText(tr('gate.labyrinth'), cx, cy + r * 1.35);
   ctx.shadowBlur = 0;
   ctx.textAlign = 'start';
   ctx.textBaseline = 'alphabetic';
@@ -233,7 +235,7 @@ export function drawDungeonGate(
   ctx.shadowColor = 'rgba(0,0,0,0.9)';
   ctx.shadowBlur = 4;
   ctx.fillStyle = '#d8c8a8';
-  ctx.fillText('DUNGEON', cx, cy + r * 1.35);
+  ctx.fillText(tr('gate.dungeon'), cx, cy + r * 1.35);
   ctx.shadowBlur = 0;
   ctx.textAlign = 'start';
   ctx.textBaseline = 'alphabetic';
@@ -328,7 +330,7 @@ export function drawStoryPortal(
   ctx.shadowColor = 'rgba(0,0,0,0.9)';
   ctx.shadowBlur = 4;
   ctx.fillStyle = '#f0c878';
-  ctx.fillText('STORY', cx, cy + r * 1.35);
+  ctx.fillText(tr('gate.story'), cx, cy + r * 1.35);
   ctx.shadowBlur = 0;
   ctx.textAlign = 'start';
   ctx.textBaseline = 'alphabetic';
@@ -418,7 +420,7 @@ export function drawBossPortal(
   ctx.shadowColor = 'rgba(0,0,0,0.9)';
   ctx.shadowBlur = 4;
   ctx.fillStyle = '#e87b6a';
-  ctx.fillText('BOSS', cx, cy + r * 1.35);
+  ctx.fillText(tr('gate.boss'), cx, cy + r * 1.35);
   ctx.shadowBlur = 0;
   ctx.textAlign = 'start';
   ctx.textBaseline = 'alphabetic';
@@ -465,7 +467,7 @@ export function drawPortalLock(
   ctx.shadowColor = 'rgba(0,0,0,0.9)';
   ctx.shadowBlur = 3;
   ctx.fillStyle = '#cdbb9a';
-  ctx.fillText('SOON', cx, cy + r * 0.62);
+  ctx.fillText(tr('gate.soon'), cx, cy + r * 0.62);
   ctx.shadowBlur = 0;
   ctx.textAlign = 'start';
   ctx.textBaseline = 'alphabetic';

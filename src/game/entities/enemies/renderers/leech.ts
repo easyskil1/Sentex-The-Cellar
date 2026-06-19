@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, radial3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  LEECH — szegmentált pióca gyűrűs testtel és elülső szívó-szájkoronggal;
@@ -36,10 +36,7 @@ export function drawLeech(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
     const sx = -t * r * 1.3;
     const sy = Math.sin(v.wob * 2 + t * 4) * r * 0.18 * t;
     const sr = r * (0.82 - t * 0.3) * pulse;
-    const seg = ctx.createRadialGradient(sx - sr * 0.3, sy - sr * 0.3, sr * 0.2, sx, sy, sr);
-    seg.addColorStop(0, light);
-    seg.addColorStop(0.6, body);
-    seg.addColorStop(1, darken(v.col, 0.35));
+    const seg = radial3(ctx, sx - sr * 0.3, sy - sr * 0.3, sr * 0.2, sx, sy, sr, 0.6, light, body, darken(v.col, 0.35));
     ctx.fillStyle = v.flash ? '#fff' : seg;
     ctx.strokeStyle = dark;
     ctx.lineWidth = 1.8;

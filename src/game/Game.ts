@@ -16,10 +16,10 @@ import {
   type Profile,
 } from './progression';
 import { loadStats, loadRecords, commitRun, resetAllStats } from './stats';
-import { loadMusicVolume, saveMusicVolume, loadSfxVolume, saveSfxVolume, loadBinds, saveBinds, loadFpsShown, saveFpsShown, loadRenderScale, saveRenderScale, saveFullscreenPref } from './settings';
+import { loadMusicVolume, saveMusicVolume, loadSfxVolume, saveSfxVolume, loadBinds, saveBinds, loadFpsShown, saveFpsShown, loadRenderScale, saveRenderScale, saveFullscreenPref, loadGameFeel, saveGameFeel, loadHitStop, saveHitStop } from './settings';
 import { DEFAULT_BINDS, type InputAction } from '../engine/Input';
 import { generateLabyrinth } from './level/labyrinth';
-import { CHAPTERS, resolveLevel } from './level/levels';
+import { CHAPTERS, resolveLevel, chapterName } from './level/levels';
 
 type GameState = 'menu' | 'play' | 'pause' | 'over' | 'offer';
 
@@ -94,6 +94,7 @@ export class Game implements EngineCallbacks {
   }
 
   update(dt: number): void {
+    this.input.pollGamepad();   // gamepad-állapot frissítése a getterek olvasása előtt
     this.updateMusic();
     // Hub (mód-választó, a world belsejében fut): ESC = vissza a főmenübe.
     if (this.world.isHub) {
@@ -135,8 +136,8 @@ export class Game implements EngineCallbacks {
   /**
    * A zenei TÉMA vezérlése a játékállapotból (minden képkockában; a setMusicTheme
    * csak váltáskor cserél decket). Főmenü/hub/game-over → nyugodt menü-zene; harci
-   * szoba/labirintus → a fejezet calm+combat párja. Szünet/ajánlat alatt a futó
-   * témát nem szakítjuk meg. Az intenzitás-crossfade-et a World adja (setMusicScene).
+   * szoba/labirintus → a fejezet calm+combat párja. Szünet/ajánlat alatt a
+   * futó témát nem szakítjuk meg. Az intenzitás-crossfade-et a World adja (setMusicScene).
    */
   private updateMusic(): void {
     const s = this.state;
@@ -230,6 +231,20 @@ export class Game implements EngineCallbacks {
         saveFpsShown(!loadFpsShown());
         this.showSettings();   // a kapcsoló-állás azonnal frissül a lapon
         break;
+      case 'toggle-gamefeel': {
+        const on = !loadGameFeel();
+        saveGameFeel(on);
+        this.world.setGameFeel(on);   // élő frissítés (a kick azonnal lecseng kikapcsoláskor)
+        this.showSettings();
+        break;
+      }
+      case 'toggle-hitstop': {
+        const on = !loadHitStop();
+        saveHitStop(on);
+        this.world.setHitStop(on);    // élő frissítés (futó fagyasztás feloldódik)
+        this.showSettings();
+        break;
+      }
       case 'toggle-audio': {
         const muted = this.audio.toggleMute();
         localStorage.setItem('sentex_muted', muted ? '1' : '0');
@@ -293,6 +308,7 @@ export class Game implements EngineCallbacks {
   private startGame(): void {
     this.audio.resume();
     this.enterHub();
+    // Nim narrációja kikapcsolva (kérésre).
   }
 
   /** Belépés a hub-terembe (a play-állapoton belül fut, mint a labirintus). */
@@ -362,13 +378,13 @@ export class Game implements EngineCallbacks {
       .sort((a, b) => a - b)
       .map((floor) => {
         const lvl = resolveLevel(floor);
-        return { floor, label: `${lvl.chapter.name} ${lvl.index}`, time: records.floorClear[floor]! };
+        return { floor, label: `${chapterName(lvl.chapter)} ${lvl.index}`, time: records.floorClear[floor]! };
       });
     // labirintus-rekordok fejezet-névvel
-    const labRecords = Object.keys(records.labClear).map((id) => ({
-      label: CHAPTERS.find((c) => c.id === id)?.name ?? id,
-      time: records.labClear[id]!,
-    }));
+    const labRecords = Object.keys(records.labClear).map((id) => {
+      const ch = CHAPTERS.find((c) => c.id === id);
+      return { label: ch ? chapterName(ch) : id, time: records.labClear[id]! };
+    });
     this.overlays.showRank({
       profile: this.profile,
       rank: rankInfo(progress.totalScore),
@@ -395,6 +411,8 @@ export class Game implements EngineCallbacks {
       fpsShown: loadFpsShown(),
       renderScale: loadRenderScale(),
       fullscreen: !!document.fullscreenElement,
+      gameFeel: loadGameFeel(),
+      hitStop: loadHitStop(),
     });
   }
 

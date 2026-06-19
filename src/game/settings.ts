@@ -48,6 +48,32 @@ export function saveFpsShown(v: boolean): void {
   localStorage.setItem(FPS_KEY, v ? '1' : '0');
 }
 
+/**
+ * „Játékérzet"-effektek (csőtorkolat-villanás, lövés-visszarúgás, kamera-kick).
+ * Tisztán vizuális/élmény-réteg, nincs teljesítmény-kockázat. Alap: BE.
+ * (A hit-stop külön kapcsoló, mert az a `dt`-t érinti - lásd `loadHitStop`.)
+ */
+const GAMEFEEL_KEY = 'sentex_gamefeel';
+export function loadGameFeel(): boolean {
+  return localStorage.getItem(GAMEFEEL_KEY) !== '0';
+}
+export function saveGameFeel(v: boolean): void {
+  localStorage.setItem(GAMEFEEL_KEY, v ? '1' : '0');
+}
+
+/**
+ * Hit-stop („sleep"): pár frame megfagyasztás ütős pillanatban (ölés / sérülés).
+ * KÜLÖN kapcsoló a game-feltől, mert a `dt`-t érinti (sokan zavarónak találják),
+ * és a memória is óvatosságra int (mozgással tesztelni). Alap: BE.
+ */
+const HITSTOP_KEY = 'sentex_hitstop';
+export function loadHitStop(): boolean {
+  return localStorage.getItem(HITSTOP_KEY) !== '0';
+}
+export function saveHitStop(v: boolean): void {
+  localStorage.setItem(HITSTOP_KEY, v ? '1' : '0');
+}
+
 /** Render-felbontás szorzó (teljesítmény ↔ élesség): 1 / 0.75 / 0.5. Alap: teljes. */
 const RSCALE_KEY = 'sentex_rscale';
 export function loadRenderScale(): number {

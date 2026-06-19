@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, linear2, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  STRIKER — agresszív ragadozó nagy sarló-karmokkal; rárontáskor
@@ -46,9 +46,7 @@ export function drawStriker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   // két nagy sarló-karom elöl (a fej két oldalán), rárontáskor kinyúlnak
   for (const sgn of [-1, 1]) {
     const reach = 0.55 + lunge * 0.4 + Math.max(0, sgn * step) * 0.12;
-    const grad = ctx.createLinearGradient(0, -r, 0, -r * 1.6);
-    grad.addColorStop(0, v.flash ? '#fff' : light);
-    grad.addColorStop(1, v.flash ? '#fff' : '#fff0e6');
+    const grad = linear2(ctx, 0, -r, 0, -r * 1.6, v.flash ? '#fff' : light, v.flash ? '#fff' : '#fff0e6');
     ctx.fillStyle = grad;
     ctx.strokeStyle = dark;
     ctx.lineWidth = 2;
@@ -73,10 +71,7 @@ export function drawStriker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // megnyúlt test (páncélos tor)
-  const g = ctx.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, darken(v.col, 0.35));
+  const g = linear3(ctx, 0, -r, 0, r, 0.5, light, body, darken(v.col, 0.35));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.5;

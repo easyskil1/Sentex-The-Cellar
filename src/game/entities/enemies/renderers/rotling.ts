@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial3, radial2 } from './helpers';
 
 /* ===================================================================== *
  *  ROTLING — zöld, puffadt mérgező féreg, csöpögő nyálkával
@@ -31,10 +31,7 @@ export function drawRotling(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // puffadt test
-  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.4, r * 0.15, 0, 0, r * 1.1);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, darken(v.col, 0.3));
+  const g = radial3(ctx, -r * 0.3, -r * 0.4, r * 0.15, 0, 0, r * 1.1, 0.6, light, body, darken(v.col, 0.3));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;
@@ -45,9 +42,7 @@ export function drawRotling(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
 
   // mérgező hólyagok a háton
   for (const [bx, by, bs] of [[-0.4, -0.45, 0.26], [0.2, -0.55, 0.22], [0.5, -0.2, 0.2], [-0.1, -0.25, 0.18]] as const) {
-    const bubble = ctx.createRadialGradient(bx * r - bs * r * 0.3, by * r - bs * r * 0.3, 1, bx * r, by * r, bs * r);
-    bubble.addColorStop(0, v.flash ? '#fff' : '#f4ffb0');
-    bubble.addColorStop(1, v.flash ? '#fff' : toxic);
+    const bubble = radial2(ctx, bx * r - bs * r * 0.3, by * r - bs * r * 0.3, 1, bx * r, by * r, bs * r, v.flash ? '#fff' : '#f4ffb0', v.flash ? '#fff' : toxic);
     ctx.fillStyle = bubble;
     ctx.strokeStyle = darken('#8fbf4a', 0.35);
     ctx.lineWidth = 1.2;

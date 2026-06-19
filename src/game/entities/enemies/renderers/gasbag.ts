@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, aura } from './helpers';
+import { lighten, darken, shadow, aura, radial3, radial2 } from './helpers';
 
 /* ===================================================================== *
  *  GASBAG — puffadt, áttetsző méreggömb gomolygó gázzal és feszülő bőrrel;
@@ -38,10 +38,7 @@ export function drawGasbag(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   }
 
   // puffadt, áttetsző gömbtest
-  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.15, 0, 0, r * 1.05);
-  g.addColorStop(0, light);
-  g.addColorStop(0.55, body);
-  g.addColorStop(1, darken(v.col, 0.28));
+  const g = radial3(ctx, -r * 0.3, -r * 0.35, r * 0.15, 0, 0, r * 1.05, 0.55, light, body, darken(v.col, 0.28));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;
@@ -57,9 +54,7 @@ export function drawGasbag(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   for (let i = 0; i < 4; i++) {
     const a = v.wob * 0.8 + (i / 4) * TAU;
     const ox = Math.cos(a) * r * 0.4, oy = Math.sin(a) * r * 0.35;
-    const blob = ctx.createRadialGradient(ox, oy, 1, ox, oy, r * 0.5);
-    blob.addColorStop(0, '#e8ff9a');
-    blob.addColorStop(1, 'rgba(159,176,74,0)');
+    const blob = radial2(ctx, ox, oy, 1, ox, oy, r * 0.5, '#e8ff9a', 'rgba(159,176,74,0)');
     ctx.fillStyle = blob;
     ctx.beginPath();
     ctx.arc(ox, oy, r * 0.5, 0, TAU);

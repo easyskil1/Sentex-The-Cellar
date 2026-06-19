@@ -1,6 +1,7 @@
 import type { World } from '../World';
 import { clamp } from '../../engine/math';
 import { HP } from '../config';
+import { tc } from '../../i18n';
 
 /**
  * Aktív képesség (klasszikus „active item" mintára). Space/E gombbal sül el, és
@@ -50,3 +51,13 @@ export const SKILLS: readonly Skill[] = [
 ];
 
 export const SKILL_BY_ID: Record<string, Skill> = Object.fromEntries(SKILLS.map((s) => [s.id, s]));
+
+/** A képesség megjelenítendő neve a jelenlegi nyelven (az `id` a stabil kulcs). */
+export function skillName(s: Skill): string {
+  return tc(s.name, `skill.${s.id}.name`);
+}
+
+/** A képesség megjelenítendő leírása a jelenlegi nyelven. */
+export function skillDesc(s: Skill): string {
+  return tc(s.desc, `skill.${s.id}.desc`);
+}

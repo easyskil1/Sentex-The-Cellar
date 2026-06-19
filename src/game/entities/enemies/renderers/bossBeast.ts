@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, radial2, radial4 } from './helpers';
 
 /**
  * BOSS 1: A Fenevad — Az alap boss modernizált, rétegzelt renderelője.
@@ -31,9 +31,7 @@ export function drawBossBeast(ctx: CanvasRenderingContext2D, v: EnemyVisual): vo
   
   // Lüktető vörös köd a boss körül
   const auraRad = r * (1.8 + Math.sin(time * 2) * 0.15);
-  const aura = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, auraRad);
-  aura.addColorStop(0, angry ? 'rgba(255,30,30,0.25)' : 'rgba(180,40,120,0.15)');
-  aura.addColorStop(1, 'rgba(0,0,0,0)');
+  const aura = radial2(ctx, 0, 0, r * 0.5, 0, 0, auraRad, angry ? 'rgba(255,30,30,0.25)' : 'rgba(180,40,120,0.15)', 'rgba(0,0,0,0)');
   ctx.fillStyle = aura;
   ctx.beginPath();
   ctx.arc(0, 0, auraRad, 0, TAU);
@@ -67,11 +65,7 @@ export function drawBossBeast(ctx: CanvasRenderingContext2D, v: EnemyVisual): vo
   }
 
   // 3. MAG (Body Core)
-  const bodyGrad = ctx.createRadialGradient(-r * 0.2, -r * 0.25, r * 0.1, 0, 0, r);
-  bodyGrad.addColorStop(0, bodyLight);
-  bodyGrad.addColorStop(0.4, bodyBase);
-  bodyGrad.addColorStop(0.8, bodyDark);
-  bodyGrad.addColorStop(1, darken(bodyDark, 0.5));
+  const bodyGrad = radial4(ctx, -r * 0.2, -r * 0.25, r * 0.1, 0, 0, r, 0.4, 0.8, bodyLight, bodyBase, bodyDark, darken(bodyDark, 0.5));
 
   ctx.fillStyle = bodyGrad;
   ctx.strokeStyle = '#000';

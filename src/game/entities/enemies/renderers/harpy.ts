@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, linear3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  HARPY — madár-nő tollas szárny-karokkal és karmos lábakkal;
@@ -45,10 +45,7 @@ export function drawHarpy(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   }
 
   // test (madár-törzs)
-  const g = ctx.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, darken(v.col, 0.32));
+  const g = linear3(ctx, 0, -r, 0, r, 0.6, light, body, darken(v.col, 0.32));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.2;

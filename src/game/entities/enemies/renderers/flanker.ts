@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, linear2, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  FLANKER — karcsú, aerodinamikus sikló-bestia oldalsó uszony-szárnyakkal;
@@ -43,9 +43,7 @@ export function drawFlanker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
 
   // oldalsó uszony-szárnyak (csapkodnak)
   for (const sgn of [-1, 1]) {
-    const wing = ctx.createLinearGradient(0, 0, 0, sgn * r);
-    wing.addColorStop(0, v.flash ? '#fff' : body);
-    wing.addColorStop(1, v.flash ? '#fff' : darken(v.col, 0.3));
+    const wing = linear2(ctx, 0, 0, 0, sgn * r, v.flash ? '#fff' : body, v.flash ? '#fff' : darken(v.col, 0.3));
     ctx.fillStyle = wing;
     ctx.strokeStyle = dark;
     ctx.lineWidth = 1.6;
@@ -59,10 +57,7 @@ export function drawFlanker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // megnyúlt, áramvonalas test
-  const g = ctx.createLinearGradient(-r, 0, r, 0);
-  g.addColorStop(0, darken(v.col, 0.25));
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, light);
+  const g = linear3(ctx, -r, 0, r, 0, 0.5, darken(v.col, 0.25), body, light);
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;

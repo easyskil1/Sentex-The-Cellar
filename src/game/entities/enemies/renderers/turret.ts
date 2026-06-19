@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear2, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  TURRET — rögzített talapzat forgó ágyúfejjel; a cső a lövés-szögbe
@@ -22,9 +22,7 @@ export function drawTurret(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.lineCap = 'round';
 
   // rögzített talapzat (széles, alacsony, csavarokkal)
-  const base = ctx.createLinearGradient(0, 0, 0, r * 0.8);
-  base.addColorStop(0, light);
-  base.addColorStop(1, darken(v.col, 0.4));
+  const base = linear2(ctx, 0, 0, 0, r * 0.8, light, darken(v.col, 0.4));
   ctx.fillStyle = v.flash ? '#fff' : base;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;
@@ -48,9 +46,7 @@ export function drawTurret(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.save();
   ctx.rotate(aim);
   // cső
-  const tube = ctx.createLinearGradient(0, -r * 0.22, 0, r * 0.22);
-  tube.addColorStop(0, lighten(metal, 0.3));
-  tube.addColorStop(1, '#26222e');
+  const tube = linear2(ctx, 0, -r * 0.22, 0, r * 0.22, lighten(metal, 0.3), '#26222e');
   ctx.fillStyle = v.flash ? '#fff' : tube;
   ctx.strokeStyle = '#15121c';
   ctx.lineWidth = 1.8;
@@ -75,10 +71,7 @@ export function drawTurret(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.restore();
 
   // forgó torony-kupola középen
-  const dome = ctx.createRadialGradient(-r * 0.2, -r * 0.2, r * 0.1, 0, 0, r * 0.62);
-  dome.addColorStop(0, light);
-  dome.addColorStop(0.7, body);
-  dome.addColorStop(1, darken(v.col, 0.35));
+  const dome = radial3(ctx, -r * 0.2, -r * 0.2, r * 0.1, 0, 0, r * 0.62, 0.7, light, body, darken(v.col, 0.35));
   ctx.fillStyle = v.flash ? '#fff' : dome;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;

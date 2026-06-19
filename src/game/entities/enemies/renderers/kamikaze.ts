@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { parse, lighten, darken, shadow, glow } from './helpers';
+import { parse, lighten, darken, shadow, glow, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  KAMIKAZE — ketyegő élő bomba: gömbtest sercegő kanóccal, vészjósló
@@ -47,10 +47,7 @@ export function drawKamikaze(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   }
 
   // bomba-gömbtest
-  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.12, 0, 0, r * 0.9);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, darken(v.col, 0.4));
+  const g = radial3(ctx, -r * 0.3, -r * 0.35, r * 0.12, 0, 0, r * 0.9, 0.6, light, body, darken(v.col, 0.4));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;

@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  TICK — kullancs: teleszívott, tojásszerű potroh, elöl apró fej +
@@ -38,10 +38,7 @@ export function drawTick(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   }
 
   // teleszívott potroh (tojás, hátrafelé nagyobb)
-  const g = ctx.createRadialGradient(-r * 0.2, -r * 0.25, r * 0.15, -r * 0.3, 0, r * 1.1);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, darken(v.col, 0.32));
+  const g = radial3(ctx, -r * 0.2, -r * 0.25, r * 0.15, -r * 0.3, 0, r * 1.1, 0.6, light, body, darken(v.col, 0.32));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = Math.max(1, r * 0.1);

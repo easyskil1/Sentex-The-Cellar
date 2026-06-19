@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial3, radial2 } from './helpers';
 
 /* ===================================================================== *
  *  SPIDER — pók (nagy és fióka egyaránt): tojás-potroh, fejtor, 8 ízelt láb,
@@ -54,10 +54,7 @@ export function drawSpider(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   }
 
   // potroh (nagy tojás, hátul)
-  const g = ctx.createRadialGradient(-r * 0.45, -r * 0.2, r * 0.15, -r * 0.5, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, darken(v.col, 0.3));
+  const g = radial3(ctx, -r * 0.45, -r * 0.2, r * 0.15, -r * 0.5, 0, r, 0.6, light, body, darken(v.col, 0.3));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = Math.max(1, r * 0.1);
@@ -83,9 +80,7 @@ export function drawSpider(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   }
 
   // fejtor (kisebb, elöl)
-  const cg = ctx.createRadialGradient(r * 0.5, -r * 0.15, r * 0.1, r * 0.45, 0, r * 0.6);
-  cg.addColorStop(0, light);
-  cg.addColorStop(1, body);
+  const cg = radial2(ctx, r * 0.5, -r * 0.15, r * 0.1, r * 0.45, 0, r * 0.6, light, body);
   ctx.fillStyle = v.flash ? '#fff' : cg;
   ctx.strokeStyle = dark;
   ctx.beginPath();

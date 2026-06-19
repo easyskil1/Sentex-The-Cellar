@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  GARGOYLE — szárnyas kődémon. Kő-fázisban (petrified) szürke, repedezett
@@ -53,10 +53,7 @@ export function drawGargoyle(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   }
 
   // törzs (kő-tömb)
-  const g = ctx.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, darken(stone ? '#6a6a5e' : v.col, 0.3));
+  const g = linear3(ctx, 0, -r, 0, r, 0.5, light, body, darken(stone ? '#6a6a5e' : v.col, 0.3));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;

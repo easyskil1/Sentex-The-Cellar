@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  MUMMY — bepólyált alak, kibomló kötés-végekkel és üres szemgödrökkel;
@@ -34,10 +34,7 @@ export function drawMummy(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   }
 
   // test (oszlopszerű, alul szélesedő)
-  const g = ctx.createLinearGradient(-r * 0.6, 0, r * 0.6, 0);
-  g.addColorStop(0, darken(v.col, 0.2));
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, darken(v.col, 0.2));
+  const g = linear3(ctx, -r * 0.6, 0, r * 0.6, 0, 0.5, darken(v.col, 0.2), body, darken(v.col, 0.2));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;

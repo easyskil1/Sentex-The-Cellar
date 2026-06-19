@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear2, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  SNIPER — karcsú orvlövész-lidérc háromlábú állványon, hosszú
@@ -56,9 +56,7 @@ export function drawSniper(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   // hosszú teleszkóp-orr / puskacső a játékos felé
   ctx.save();
   ctx.rotate(look);
-  const barrel = ctx.createLinearGradient(0, -r * 0.18, 0, r * 0.18);
-  barrel.addColorStop(0, light);
-  barrel.addColorStop(1, dark);
+  const barrel = linear2(ctx, 0, -r * 0.18, 0, r * 0.18, light, dark);
   ctx.fillStyle = v.flash ? '#fff' : barrel;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 1.6;
@@ -79,10 +77,7 @@ export function drawSniper(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.restore();
 
   // karcsú test (megnyúlt tojás)
-  const g = ctx.createRadialGradient(-r * 0.25, -r * 0.3, r * 0.1, 0, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.65, body);
-  g.addColorStop(1, darken(v.col, 0.3));
+  const g = radial3(ctx, -r * 0.25, -r * 0.3, r * 0.1, 0, 0, r, 0.65, light, body, darken(v.col, 0.3));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;
@@ -105,10 +100,7 @@ export function drawSniper(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.beginPath();
   ctx.arc(0, -r * 0.04, r * 0.36, 0, TAU);
   ctx.fill();
-  const iris = ctx.createRadialGradient(ex, -r * 0.04 + ey, 1, 0, -r * 0.04, r * 0.3);
-  iris.addColorStop(0, v.active ? '#ffd0c0' : '#fff');
-  iris.addColorStop(0.5, v.active ? '#ff6a4a' : light);
-  iris.addColorStop(1, darken(v.col, 0.15));
+  const iris = radial3(ctx, ex, -r * 0.04 + ey, 1, 0, -r * 0.04, r * 0.3, 0.5, v.active ? '#ffd0c0' : '#fff', v.active ? '#ff6a4a' : light, darken(v.col, 0.15));
   ctx.fillStyle = v.flash ? '#fff' : iris;
   ctx.beginPath();
   ctx.arc(0, -r * 0.04, r * 0.27, 0, TAU);

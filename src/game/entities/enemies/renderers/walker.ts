@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  WALKER — narancs zömök, mérges talajlény, billegő lábakkal
@@ -41,11 +41,7 @@ export function drawWalker(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   }
 
   // test (zömök, lekerekített)
-  const bodyGrad = ctx.createLinearGradient(0, -r, 0, r * 0.9);
-  bodyGrad.addColorStop(0, light);
-  bodyGrad.addColorStop(0.55, body);
-  bodyGrad.addColorStop(1, darken(v.col, 0.25));
-  ctx.fillStyle = v.flash ? '#fff' : bodyGrad;
+  ctx.fillStyle = v.flash ? '#fff' : linear3(ctx, 0, -r, 0, r * 0.9, 0.55, light, body, darken(v.col, 0.25));
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;
   ctx.beginPath();

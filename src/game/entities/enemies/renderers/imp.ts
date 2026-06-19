@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, radial3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  IMP — kis vörös ördögfióka szarvakkal, denevérszárnnyal és villás farokkal;
@@ -73,10 +73,7 @@ export function drawImp(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   ctx.fill();
 
   // test
-  const g = ctx.createRadialGradient(-r * 0.15, -r * 0.2, r * 0.1, 0, 0, r * 0.6);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, darken(v.col, 0.32));
+  const g = radial3(ctx, -r * 0.15, -r * 0.2, r * 0.1, 0, 0, r * 0.6, 0.6, light, body, darken(v.col, 0.32));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.2;
@@ -128,10 +125,7 @@ export function drawImp(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   // tűzgolyó a kézben (lövés előtt)
   if (v.active && !v.hidden) {
     const fx = Math.cos(look) * r * 0.6, fy = Math.sin(look) * r * 0.6 + r * 0.1;
-    const fire = ctx.createRadialGradient(fx, fy, 1, fx, fy, r * 0.3);
-    fire.addColorStop(0, '#fff3b0');
-    fire.addColorStop(0.5, '#ff9a3a');
-    fire.addColorStop(1, '#ff4a1e');
+    const fire = radial3(ctx, fx, fy, 1, fx, fy, r * 0.3, 0.5, '#fff3b0', '#ff9a3a', '#ff4a1e');
     ctx.fillStyle = fire;
     glow(ctx, fx, fy, r * 0.2, '#ff7a2a', 12);
     ctx.beginPath();

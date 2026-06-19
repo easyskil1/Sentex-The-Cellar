@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial3, radial2 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  HYDRA — közös test több kígyó-nyakkal; a fejek száma a HP-tól függ
@@ -22,10 +22,7 @@ export function drawHydra(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   ctx.lineCap = 'round';
 
   // közös test (zömök, tüskés)
-  const g = ctx.createRadialGradient(-r * 0.2, -r * 0.1, r * 0.15, 0, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.6, body);
-  g.addColorStop(1, darken(v.col, 0.35));
+  const g = radial3(ctx, -r * 0.2, -r * 0.1, r * 0.15, 0, 0, r, 0.6, light, body, darken(v.col, 0.35));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;
@@ -73,9 +70,7 @@ export function drawHydra(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
     ctx.save();
     ctx.translate(nx, ny);
     ctx.rotate(na + wig);
-    const hg = ctx.createRadialGradient(r * 0.1, -r * 0.05, r * 0.05, 0, 0, r * 0.4);
-    hg.addColorStop(0, light);
-    hg.addColorStop(1, body);
+    const hg = radial2(ctx, r * 0.1, -r * 0.05, r * 0.05, 0, 0, r * 0.4, light, body);
     ctx.fillStyle = v.flash ? '#fff' : hg;
     ctx.strokeStyle = dark;
     ctx.lineWidth = 1.8;

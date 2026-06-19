@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow, aura } from './helpers';
+import { lighten, darken, shadow, glow, aura, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  HEALER — lebegő gyógyító-pap zöld életaurában, kereszt-amulettel;
@@ -52,10 +52,7 @@ export function drawHealer(ctx: CanvasRenderingContext2D, v: EnemyVisual): void 
   ctx.globalAlpha = 1;
 
   // köpenyes test (lágy, lekerekített)
-  const g = ctx.createLinearGradient(0, -r, 0, r * 1.1);
-  g.addColorStop(0, light);
-  g.addColorStop(0.55, body);
-  g.addColorStop(1, darken(v.col, 0.3));
+  const g = linear3(ctx, 0, -r, 0, r * 1.1, 0.55, light, body, darken(v.col, 0.3));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.2;

@@ -4,9 +4,11 @@ import { Input } from './engine/Input';
 import { AudioManager } from './engine/Audio';
 import { Game } from './game/Game';
 import { Overlays } from './ui/Overlays';
+import { dropConfig } from './game/content/dropConfig';
 import { drawPlayer } from './game/entities/PlayerRenderer';
 import { FpsMeter } from './ui/FpsMeter';
 import { loadRenderScale, loadFullscreenPref } from './game/settings';
+import { initI18n } from './i18n';
 // Side-effect: a böngészőbe mentett pályákat betölti (helyben felülírja a MAPS-ot),
 // hogy a szerkesztett pályák a játékban is érvényesüljenek, ne csak az editorban.
 import './game/level/mapStore';
@@ -15,6 +17,9 @@ import './game/level/mapStore';
 import { version as APP_VERSION } from '../package.json';
 
 function init() {
+  // A mentett JÁTÉK-nyelv alkalmazása a statikus menü-DOM-ra (az admin magyar marad).
+  initI18n();
+
   const canvas = document.getElementById('game');
   if (!(canvas instanceof HTMLCanvasElement)) {
     throw new Error('#game canvas nem található');
@@ -49,6 +54,12 @@ function init() {
   audio.registerMusic('combat2', `${musicBase}Heavy_Interlude.mp3`);  // harc B
 
   const game = new Game(engine, audio, input, overlays);
+
+  // Fejlesztői debug-hozzáférés + dev-only UI (Admin menü) csak dev buildben.
+  if (import.meta.env.DEV) {
+    document.body.classList.add('dev');
+    (window as unknown as { __sentex: unknown }).__sentex = { engine, game, world: game.world, dropConfig };
+  }
 
   // Némítás kapcsoló (M)
   addEventListener('keydown', (e) => {
@@ -121,6 +132,15 @@ function drawMenuCharacter(dirX = 0, dirY = 1): void {
   drawPlayer(ctx, {
     x: W / 2, y: H / 2 - r * 0.2, r,
     dirX, dirY, walk: 0, lean: 0, invuln: 0, moving: false,
+  });
+}
+
+// PWA: a service worker csak PRODUCTION buildben regisztrálódik (a dev HMR-t és a
+// __save-* mentő-végpontokat ne zavarja). Relatív path → a GitHub Pages
+// alkönyvtárban is helyes a scope. A PWA opcionális: hiba esetén csendben elmarad.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => { /* PWA opcionális */ });
   });
 }
 

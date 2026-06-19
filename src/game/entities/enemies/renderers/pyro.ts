@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, radial3 } from './helpers';
 
 /* ===================================================================== *
  *  PYRO — narancs magma-szörny, izzó repedésekkel; közelről lángot okád
@@ -65,10 +65,7 @@ export function drawPyro(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   }
 
   // test (sötét megszilárdult kéreg)
-  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.4, r * 0.15, 0, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, darken(v.col, 0.55));
+  const g = radial3(ctx, -r * 0.3, -r * 0.4, r * 0.15, 0, 0, r, 0.5, light, body, darken(v.col, 0.55));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;
@@ -119,10 +116,7 @@ export function drawPyro(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
 
   // izzó száj (lángoláskor tátva, világít)
   const open = v.breathing ? r * 0.26 : r * 0.1;
-  const mouthGrad = ctx.createRadialGradient(0, r * 0.42, 1, 0, r * 0.42, r * 0.4);
-  mouthGrad.addColorStop(0, '#fff3b0');
-  mouthGrad.addColorStop(0.5, '#ff7a1e');
-  mouthGrad.addColorStop(1, '#7a1500');
+  const mouthGrad = radial3(ctx, 0, r * 0.42, 1, 0, r * 0.42, r * 0.4, 0.5, '#fff3b0', '#ff7a1e', '#7a1500');
   ctx.fillStyle = v.breathing ? mouthGrad : '#3a1000';
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2;

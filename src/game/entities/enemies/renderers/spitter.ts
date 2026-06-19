@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow } from './helpers';
+import { lighten, darken, shadow, linear3, radial2 } from './helpers';
 
 /* ===================================================================== *
  *  SPITTER — savzöld varangy, felfúvódó toroktömlővel és tátott pofával
@@ -32,10 +32,7 @@ export function drawSpitter(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // test
-  const g = ctx.createLinearGradient(0, -r * 0.8, 0, r * 0.8);
-  g.addColorStop(0, light);
-  g.addColorStop(0.55, body);
-  g.addColorStop(1, darken(v.col, 0.28));
+  const g = linear3(ctx, 0, -r * 0.8, 0, r * 0.8, 0.55, light, body, darken(v.col, 0.28));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;
@@ -53,9 +50,7 @@ export function drawSpitter(ctx: CanvasRenderingContext2D, v: EnemyVisual): void
   }
 
   // felfúvódó toroktömlő (savsárga, lövéskor világít)
-  const throatGrad = ctx.createRadialGradient(0, r * 0.3, 2, 0, r * 0.3, r * 0.5 * sac);
-  throatGrad.addColorStop(0, v.active ? '#f4ff8a' : lighten(v.col, 0.3));
-  throatGrad.addColorStop(1, darken(v.col, 0.1));
+  const throatGrad = radial2(ctx, 0, r * 0.3, 2, 0, r * 0.3, r * 0.5 * sac, v.active ? '#f4ff8a' : lighten(v.col, 0.3), darken(v.col, 0.1));
   ctx.fillStyle = v.flash ? '#fff' : throatGrad;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 1.8;

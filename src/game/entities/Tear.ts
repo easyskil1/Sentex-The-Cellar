@@ -122,7 +122,7 @@ export class Tear {
       }
       this.hits.add(e);
       e.hp -= this.dmg;
-      e.flash = 0.08;
+      if (!e.boss) e.flash = 0.08; // boss: nincs fehér villanás (nagy test → zavaró strobe)
       world.addDamage(e.x, e.y - e.r, this.dmg);
       if (this.knockback) this.shove(e, world);
       // elemi státuszok — csak az alap-ellenfelekre (a bossok ellenállnak)
@@ -152,7 +152,7 @@ export class Tear {
       if (e === from) continue;
       if (dist2(from.x, from.y, e.x, e.y) >= R2) continue;
       e.hp -= this.dmg * 0.5;
-      e.flash = 0.08;
+      if (!e.boss) e.flash = 0.08;
       world.addDamage(e.x, e.y - e.r, this.dmg * 0.5, { color: '#fff36a' });
       world.particles.spawn(e.x, e.y, '#fff36a', 4, 120, 0.25);
       if (e.hp <= 0) world.killEnemy(e);

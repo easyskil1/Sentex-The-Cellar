@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear3, radial2, linear2 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  MINOTAUR — izmos bika-ember, ívelt szarvakkal és orrkarikával;
@@ -48,10 +48,7 @@ export function drawMinotaur(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   }
 
   // izmos törzs
-  const g = ctx.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, light);
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, darken(v.col, 0.4));
+  const g = linear3(ctx, 0, -r, 0, r, 0.5, light, body, darken(v.col, 0.4));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.8;
@@ -70,9 +67,7 @@ export function drawMinotaur(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   ctx.save();
   ctx.translate(0, -r * 0.65);
   // pofa
-  const hg = ctx.createRadialGradient(-r * 0.1, -r * 0.1, r * 0.1, 0, 0, r * 0.6);
-  hg.addColorStop(0, light);
-  hg.addColorStop(1, body);
+  const hg = radial2(ctx, -r * 0.1, -r * 0.1, r * 0.1, 0, 0, r * 0.6, light, body);
   ctx.fillStyle = v.flash ? '#fff' : hg;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.4;
@@ -100,9 +95,7 @@ export function drawMinotaur(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   ctx.stroke();
   // ívelt szarvak
   for (const sgn of [-1, 1]) {
-    const horn = ctx.createLinearGradient(0, -r * 0.3, sgn * r * 0.7, -r * 0.7);
-    horn.addColorStop(0, '#efe7d2');
-    horn.addColorStop(1, '#b8a878');
+    const horn = linear2(ctx, 0, -r * 0.3, sgn * r * 0.7, -r * 0.7, '#efe7d2', '#b8a878');
     ctx.fillStyle = v.flash ? '#fff' : horn;
     ctx.strokeStyle = dark;
     ctx.lineWidth = 1.8;

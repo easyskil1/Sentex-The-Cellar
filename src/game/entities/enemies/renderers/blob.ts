@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, shadow } from './helpers';
+import { lighten, shadow, radial2 } from './helpers';
 
 /**
  * Fallback-rajz: egyszerű színes folt szemekkel — a MÉG kinézet nélküli új
@@ -15,10 +15,7 @@ export function drawBlob(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   shadow(ctx, v, 0.8, 0.8);
   ctx.save();
   ctx.translate(v.x, v.y + float);
-  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.2, 0, 0, r);
-  g.addColorStop(0, lighten(body, 0.35));
-  g.addColorStop(1, body);
-  ctx.fillStyle = g;
+  ctx.fillStyle = radial2(ctx, -r * 0.3, -r * 0.3, r * 0.2, 0, 0, r, lighten(body, 0.35), body);
   ctx.strokeStyle = dark;
   ctx.lineWidth = 3;
   ctx.beginPath();

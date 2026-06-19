@@ -48,6 +48,124 @@ export function darken(hex: string, f: number): string {
   return s;
 }
 
+/* ----------------------------------------------------------------- *
+ *  Gradiens-cache (FORRÓ ÚT)
+ *
+ *  A renderek a `translate(v.x, v.y)` UTÁN, LOKÁLIS koordinátán hozzák létre a
+ *  body-gradienst — a geometria csak `r`-től, a stopok a (cache-elt) színektől
+ *  függenek. Cache nélkül minden ellenfél képkockánként egy CanvasGradient + 2-3
+ *  colorStop objektumot allokál (GC-szemét). A `(geometria|színek)` kulcs szerint
+ *  memoizálva ugyanaz az ellenfél képkockáról képkockára újrahasználja, és a
+ *  szomszédos azonos típusúak is osztoznak. A gradiens-objektum kontextus-függő,
+ *  ezért ctx-váltáskor (ritka) ürítünk. A koordináták egészre kerekülnek a kulcsban:
+ *  ez korlátozza a cache-t; egy adott ellenfél `r`-je állandó → frame-azonos rajz.
+ * ----------------------------------------------------------------- */
+const gradCache = new Map<string, CanvasGradient>();
+let gradCtx: CanvasRenderingContext2D | null = null;
+
+function evict(): void {
+  if (gradCache.size > 600) gradCache.delete(gradCache.keys().next().value!);
+}
+
+/** Memoizált 2-stop radiális gradiens (lokális koordináta, translate UTÁN). */
+export function radial2(
+  ctx: CanvasRenderingContext2D,
+  x0: number, y0: number, r0: number, x1: number, y1: number, r1: number,
+  c0: string, c1: string,
+): CanvasGradient {
+  if (ctx !== gradCtx) { gradCache.clear(); gradCtx = ctx; }
+  const key = `R2|${x0 | 0},${y0 | 0},${r0 | 0},${x1 | 0},${y1 | 0},${r1 | 0}|${c0}|${c1}`;
+  let g = gradCache.get(key);
+  if (g === undefined) {
+    g = ctx.createRadialGradient(x0, y0, r0, x1, y1, r1);
+    g.addColorStop(0, c0);
+    g.addColorStop(1, c1);
+    gradCache.set(key, g);
+    evict();
+  }
+  return g;
+}
+
+/** Memoizált 3-stop radiális gradiens (lokális koordináta, translate UTÁN). */
+export function radial3(
+  ctx: CanvasRenderingContext2D,
+  x0: number, y0: number, r0: number, x1: number, y1: number, r1: number,
+  o1: number, c0: string, c1: string, c2: string,
+): CanvasGradient {
+  if (ctx !== gradCtx) { gradCache.clear(); gradCtx = ctx; }
+  const key = `R3|${x0 | 0},${y0 | 0},${r0 | 0},${x1 | 0},${y1 | 0},${r1 | 0}|${o1}|${c0}|${c1}|${c2}`;
+  let g = gradCache.get(key);
+  if (g === undefined) {
+    g = ctx.createRadialGradient(x0, y0, r0, x1, y1, r1);
+    g.addColorStop(0, c0);
+    g.addColorStop(o1, c1);
+    g.addColorStop(1, c2);
+    gradCache.set(key, g);
+    evict();
+  }
+  return g;
+}
+
+/** Memoizált 4-stop radiális gradiens (lokális koordináta, translate UTÁN). */
+export function radial4(
+  ctx: CanvasRenderingContext2D,
+  x0: number, y0: number, r0: number, x1: number, y1: number, r1: number,
+  o1: number, o2: number, c0: string, c1: string, c2: string, c3: string,
+): CanvasGradient {
+  if (ctx !== gradCtx) { gradCache.clear(); gradCtx = ctx; }
+  const key = `R4|${x0 | 0},${y0 | 0},${r0 | 0},${x1 | 0},${y1 | 0},${r1 | 0}|${o1},${o2}|${c0}|${c1}|${c2}|${c3}`;
+  let g = gradCache.get(key);
+  if (g === undefined) {
+    g = ctx.createRadialGradient(x0, y0, r0, x1, y1, r1);
+    g.addColorStop(0, c0);
+    g.addColorStop(o1, c1);
+    g.addColorStop(o2, c2);
+    g.addColorStop(1, c3);
+    gradCache.set(key, g);
+    evict();
+  }
+  return g;
+}
+
+/** Memoizált 2-stop lineáris gradiens (lokális koordináta, translate UTÁN). */
+export function linear2(
+  ctx: CanvasRenderingContext2D,
+  x0: number, y0: number, x1: number, y1: number,
+  c0: string, c1: string,
+): CanvasGradient {
+  if (ctx !== gradCtx) { gradCache.clear(); gradCtx = ctx; }
+  const key = `L2|${x0 | 0},${y0 | 0},${x1 | 0},${y1 | 0}|${c0}|${c1}`;
+  let g = gradCache.get(key);
+  if (g === undefined) {
+    g = ctx.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, c0);
+    g.addColorStop(1, c1);
+    gradCache.set(key, g);
+    evict();
+  }
+  return g;
+}
+
+/** Memoizált 3-stop lineáris gradiens (lokális koordináta, translate UTÁN). */
+export function linear3(
+  ctx: CanvasRenderingContext2D,
+  x0: number, y0: number, x1: number, y1: number,
+  o1: number, c0: string, c1: string, c2: string,
+): CanvasGradient {
+  if (ctx !== gradCtx) { gradCache.clear(); gradCtx = ctx; }
+  const key = `L3|${x0 | 0},${y0 | 0},${x1 | 0},${y1 | 0}|${o1}|${c0}|${c1}|${c2}`;
+  let g = gradCache.get(key);
+  if (g === undefined) {
+    g = ctx.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, c0);
+    g.addColorStop(o1, c1);
+    g.addColorStop(1, c2);
+    gradCache.set(key, g);
+    evict();
+  }
+  return g;
+}
+
 /** Talaj-árnyék — minden típus ezt használja, méret-skálával. */
 export function shadow(ctx: CanvasRenderingContext2D, v: EnemyVisual, scale = 0.9, lift = 0.7): void {
   ctx.fillStyle = 'rgba(0,0,0,0.28)';

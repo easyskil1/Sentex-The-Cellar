@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear2, linear3, radial2 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  WEREWOLF — görnyedt, izmos farkasember: bozontos sörény, hosszú karmos
@@ -37,9 +37,7 @@ export function drawWerewolf(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   ctx.save();
   ctx.translate(tailSide * r * 0.55, r * 0.3);
   ctx.rotate(tailSide * (0.4 + sway * 0.2));
-  const tg = ctx.createLinearGradient(0, 0, tailSide * r, r * 0.2);
-  tg.addColorStop(0, darken(v.col, 0.18));
-  tg.addColorStop(1, fur);
+  const tg = linear2(ctx, 0, 0, tailSide * r, r * 0.2, darken(v.col, 0.18), fur);
   ctx.fillStyle = v.flash ? '#fff' : tg;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 1.6;
@@ -84,10 +82,7 @@ export function drawWerewolf(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   }
 
   // ---------- TÖRZS (görnyedt, izmos) ----------
-  const g = ctx.createLinearGradient(0, -r * 0.9, 0, r * 0.7);
-  g.addColorStop(0, light);
-  g.addColorStop(0.45, body);
-  g.addColorStop(1, darken(v.col, 0.42));
+  const g = linear3(ctx, 0, -r * 0.9, 0, r * 0.7, 0.45, light, body, darken(v.col, 0.42));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.6;
@@ -202,9 +197,7 @@ export function drawWerewolf(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   }
 
   // koponya
-  const hg = ctx.createRadialGradient(-r * 0.1, -r * 0.12, r * 0.06, 0, 0, r * 0.5);
-  hg.addColorStop(0, light);
-  hg.addColorStop(1, body);
+  const hg = radial2(ctx, -r * 0.1, -r * 0.12, r * 0.06, 0, 0, r * 0.5, light, body);
   ctx.fillStyle = v.flash ? '#fff' : hg;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.2;

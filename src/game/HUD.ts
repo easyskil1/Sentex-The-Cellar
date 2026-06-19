@@ -1,3 +1,6 @@
+import { t as tr } from '../i18n';
+import { itemName, itemDesc } from './content/items';
+import { skillName } from './content/skills';
 import type { World } from './World';
 import type { Player } from './entities/Player';
 import { drawHeart, drawBombIcon, drawCoinIcon } from './entities/Pickup';
@@ -92,7 +95,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, world: World, best: numbe
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = COL.muted;
   ctx.font = `500 12px ${SERIF}`;
-  ctx.fillText(`DEEPEST: ${best}`, w - 26, h - 18);
+  ctx.fillText(tr('hud.deepest', { n: best }), w - 26, h - 18);
   ctx.textAlign = 'left';
 
   // ---- boss életcsík ----
@@ -114,11 +117,121 @@ export function drawHUD(ctx: CanvasRenderingContext2D, world: World, best: numbe
     ctx.fillStyle = '#f0c6ff';
     ctx.font = `600 14px ${SERIF}`;
     ctx.textAlign = 'center';
-    ctx.fillText('BOSS', w / 2, by - 8);
+    ctx.fillText(tr('hud.boss'), w / 2, by - 8);
     ctx.textAlign = 'left';
   }
 
   ctx.restore();
+
+  drawBossIntro(ctx, world, w, h); // gótikus boss-névtábla (a HUD fölött, képernyő-térben)
+}
+
+/**
+ * Boss-intro: gótikus, animált NÉVTÁBLA a szoba-belépéskor (#60/Ú4). Nincs doboz/
+ * kártya - a hangulatot arany filigrán vonalak + rombusz-flourish + lágy sötét
+ * derengés adja. Animáció: fölfelé settling + fade-in (0.35s), tartás, majd
+ * fade-out (0.6s); a betűk enyhén kifutó betűközzel jelennek meg.
+ */
+function drawBossIntro(ctx: CanvasRenderingContext2D, world: World, w: number, h: number): void {
+  const intro = world.bossIntroView;
+  if (!intro) return;
+
+  const DUR = 2.4, FADE_IN = 0.35, FADE_OUT = 0.6;
+  const age = DUR - intro.t;                       // 0 → DUR
+  const inA = clamp(age / FADE_IN, 0, 1);          // megjelenés
+  const outA = clamp(intro.t / FADE_OUT, 0, 1);    // eltűnés
+  const alpha = Math.min(inA, outA);
+  if (alpha <= 0) return;
+
+  const ease = 1 - Math.pow(1 - inA, 3);           // ease-out a settlinghez
+  const cx = w / 2;
+  const cy = h * 0.30 + (1 - ease) * 18;           // kissé fentről „leül"
+  const name = intro.name.toUpperCase();
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // ---- lágy, vízszintes sötét derengés (NEM doboz - alul-felül elhalványul) ----
+  const band = ctx.createLinearGradient(0, cy - 64, 0, cy + 64);
+  band.addColorStop(0, 'rgba(0,0,0,0)');
+  band.addColorStop(0.5, `rgba(8,4,10,${0.5 * alpha})`);
+  band.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = band;
+  ctx.fillRect(0, cy - 64, w, 128);
+
+  // ---- kicker: apró, ritkított felirat a név fölött ----
+  ctx.globalAlpha = alpha * 0.9;
+  ctx.fillStyle = '#b08850';
+  ctx.font = `600 13px ${SERIF}`;
+  drawSpacedText(ctx, tr('hud.bossIntroKicker'), cx, cy - 30, 5);
+
+  // ---- a NÉV: arany színátmenet, sötét kontúr, finom ragyogás ----
+  const fs = 44;
+  ctx.font = `700 ${fs}px ${SERIF}`;
+  const half = ctx.measureText(name).width / 2;
+  const grad = ctx.createLinearGradient(0, cy - fs * 0.5, 0, cy + fs * 0.5);
+  grad.addColorStop(0, '#ffe9a8');
+  grad.addColorStop(0.55, '#e8b85a');
+  grad.addColorStop(1, '#9c6b28');
+  ctx.globalAlpha = alpha;
+  ctx.shadowColor = `rgba(255,180,90,${0.5 * alpha})`;
+  ctx.shadowBlur = 18;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = `rgba(0,0,0,${0.7 * alpha})`;
+  ctx.strokeText(name, cx, cy);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = grad;
+  ctx.fillText(name, cx, cy);
+
+  // ---- arany filigrán: két vízszintes vonal a név alatt, középen rombusz ----
+  const lineY = cy + fs * 0.62;
+  const reach = (half + 26) * ease;                // a vonalak kifelé „nyúlnak"
+  const gap = 16;
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#c89a4a';
+  ctx.lineWidth = 1.4;
+  for (const s of [-1, 1]) {
+    const x0 = cx + s * gap, x1 = cx + s * reach;
+    const lg = ctx.createLinearGradient(x0, 0, x1, 0);
+    lg.addColorStop(0, '#e8c878');
+    lg.addColorStop(1, 'rgba(200,154,74,0)');
+    ctx.strokeStyle = lg;
+    ctx.beginPath();
+    ctx.moveTo(x0, lineY);
+    ctx.lineTo(x1, lineY);
+    ctx.stroke();
+  }
+  // középső rombusz-flourish
+  const ds = 4.5;
+  ctx.fillStyle = '#e8c878';
+  ctx.beginPath();
+  ctx.moveTo(cx, lineY - ds);
+  ctx.lineTo(cx + ds, lineY);
+  ctx.lineTo(cx, lineY + ds);
+  ctx.lineTo(cx - ds, lineY);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+/** Ritkított (letter-spaced) középre igazított szöveg rajzolása. */
+function drawSpacedText(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number, spacing: number): void {
+  const chars = [...text];
+  let total = 0;
+  for (const c of chars) total += ctx.measureText(c).width + spacing;
+  total -= spacing;
+  let x = cx - total / 2;
+  const prevAlign = ctx.textAlign;
+  ctx.textAlign = 'left';
+  for (const c of chars) {
+    const cw = ctx.measureText(c).width;
+    ctx.fillText(c, x, y);
+    x += cw + spacing;
+  }
+  ctx.textAlign = prevAlign;
 }
 
 /**
@@ -240,13 +353,13 @@ function drawCounter(
 /** Passzív statok bal oldalt — csak igazított szöveg, tompított színkóddal. */
 function drawStats(ctx: CanvasRenderingContext2D, p: Player): void {
   const rows: Array<[string, string, string]> = [
-    ['Damage', p.dmg.toFixed(1), '#e87a6a'], // a harci gazdaság ×100-on él — a valós sebzés-pontot mutatjuk (alap 300,0)
-    ['Fire rate', `${(1 / p.fireRate).toFixed(1)}/s`, '#9ab4d8'],
-    ['Range', (p.range * p.rangeMul * 10).toFixed(0), '#e8c878'],
-    ['Shot speed', p.shotSpeed.toFixed(0), '#bca4d8'],
-    ['Speed', p.speed.toFixed(0), '#9ac8a0'],
-    ['Luck', p.luck.toFixed(0), '#9ad0c0'],
-    ['Sight', `${Math.round(p.sight * 100)}%`, '#bcc6d8'],
+    [tr('hud.stat.damage'), p.dmg.toFixed(1), '#e87a6a'], // a harci gazdaság ×100-on él — a valós sebzés-pontot mutatjuk (alap 300,0)
+    [tr('hud.stat.fireRate'), `${(1 / p.fireRate).toFixed(1)}/s`, '#9ab4d8'],
+    [tr('hud.stat.range'), (p.range * p.rangeMul * 10).toFixed(0), '#e8c878'],
+    [tr('hud.stat.shotSpeed'), p.shotSpeed.toFixed(0), '#bca4d8'],
+    [tr('hud.stat.speed'), p.speed.toFixed(0), '#9ac8a0'],
+    [tr('hud.stat.luck'), p.luck.toFixed(0), '#9ad0c0'],
+    [tr('hud.stat.sight'), `${Math.round(p.sight * 100)}%`, '#bcc6d8'],
   ];
   const valX = LX + COLW;
   const rh = 18;
@@ -292,7 +405,7 @@ function drawCollected(ctx: CanvasRenderingContext2D, p: Player, h: number): voi
   ctx.textBaseline = 'alphabetic';
   ctx.font = `600 11px ${SERIF}`;
   ctx.fillStyle = COL.muted;
-  ctx.fillText(hidden > 0 ? `PILLS  ·  +${hidden}` : 'PILLS', LX, headTop);
+  ctx.fillText(hidden > 0 ? tr('hud.pillsMore', { n: hidden }) : tr('hud.pills'), LX, headTop);
 
   let y = listTop + 4;
   for (const it of shown) {
@@ -300,11 +413,11 @@ function drawCollected(ctx: CanvasRenderingContext2D, p: Player, h: number): voi
     ctx.textAlign = 'left';
     ctx.font = `600 12px ${SERIF}`;
     ctx.fillStyle = COL.text;
-    ctx.fillText(fit(ctx, it.name, NAME_MAX), LX + ICON, y);
+    ctx.fillText(fit(ctx, itemName(it), NAME_MAX), LX + ICON, y);
     ctx.textAlign = 'right';
     ctx.font = `400 12px ${SERIF}`;
     ctx.fillStyle = it.col;
-    ctx.fillText(fit(ctx, it.desc, DESC_MAX), LX + rowW, y);
+    ctx.fillText(fit(ctx, itemDesc(it), DESC_MAX), LX + rowW, y);
     ctx.textAlign = 'left';
     y += rowH;
   }
@@ -367,7 +480,7 @@ function drawSkill(ctx: CanvasRenderingContext2D, p: Player, h: number, t: numbe
   ctx.font = `600 18px ${SERIF}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(skill.name.charAt(0).toUpperCase(), cx, cy + 1);
+  ctx.fillText(skillName(skill).charAt(0).toUpperCase(), cx, cy + 1);
   ctx.textBaseline = 'alphabetic';
 
   // készenléti szikra-pukkanás
@@ -390,10 +503,10 @@ function drawSkill(ctx: CanvasRenderingContext2D, p: Player, h: number, t: numbe
   ctx.textAlign = 'left';
   ctx.fillStyle = ready ? COL.cream : COL.muted;
   ctx.font = `600 14px ${SERIF}`;
-  ctx.fillText(fit(ctx, skill.name, 130), tx, cy - 2);
+  ctx.fillText(fit(ctx, skillName(skill), 130), tx, cy - 2);
   ctx.fillStyle = ready ? skill.col : COL.muted;
   ctx.font = `600 11px ${SERIF}`;
-  ctx.fillText(ready ? 'READY — E' : 'charging…', tx, cy + 13);
+  ctx.fillText(ready ? tr('hud.skillReady') : tr('hud.skillCharging'), tx, cy + 13);
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -447,10 +560,10 @@ function drawTimers(ctx: CanvasRenderingContext2D, world: World, w: number): voi
       const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 110);
       col = `rgba(255,${Math.round(70 + 40 * pulse)},${Math.round(60 + 30 * pulse)},1)`;
     }
-    drawTimerLine(ctx, cx, MAP_TOP - 26, 'LABYRINTH', formatTime(left, urgent), col);
+    drawTimerLine(ctx, cx, MAP_TOP - 26, tr('hud.timer.labyrinth'), formatTime(left, urgent), col);
   } else {
-    drawTimerLine(ctx, cx, MAP_TOP - 30, 'ROOM', formatTime(rs.room, true), COL.cream);
-    drawTimerLine(ctx, cx, MAP_TOP - 12, 'MAP', formatTime(rs.floor), COL.gold);
+    drawTimerLine(ctx, cx, MAP_TOP - 30, tr('hud.timer.room'), formatTime(rs.room, true), COL.cream);
+    drawTimerLine(ctx, cx, MAP_TOP - 12, tr('hud.timer.map'), formatTime(rs.floor), COL.gold);
   }
   ctx.restore();
 }

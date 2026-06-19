@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear3 } from './helpers';
 
 /* ===================================================================== *
  *  SUMMONER — lebegő csuklyás idéző, alatta forgó idéző-glifa-koronggal;
@@ -48,10 +48,7 @@ export function drawSummoner(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
 
   // alul szétfoszló köpenyszél
   const tatters = 6;
-  const g = ctx.createLinearGradient(0, -r, 0, r * 1.3);
-  g.addColorStop(0, light);
-  g.addColorStop(0.55, body);
-  g.addColorStop(1, darken(v.col, 0.4));
+  const g = linear3(ctx, 0, -r, 0, r * 1.3, 0.55, light, body, darken(v.col, 0.4));
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2.2;

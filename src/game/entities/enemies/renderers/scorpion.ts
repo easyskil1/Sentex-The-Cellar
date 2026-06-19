@@ -1,6 +1,6 @@
 import type { EnemyVisual } from './types';
 import { TAU } from '../../../../engine/math';
-import { lighten, darken, shadow, glow } from './helpers';
+import { lighten, darken, shadow, glow, linear3 } from './helpers';
 
 /* ---------------------------------------------------------------------
  *  SCORPION — páncélos skorpió két ollóval és felgörbülő méreg-farokkal;
@@ -69,10 +69,7 @@ export function drawScorpion(ctx: CanvasRenderingContext2D, v: EnemyVisual): voi
   }
 
   // test (páncélos)
-  const g = ctx.createLinearGradient(-r, 0, r, 0);
-  g.addColorStop(0, darken(v.col, 0.2));
-  g.addColorStop(0.5, body);
-  g.addColorStop(1, light);
+  const g = linear3(ctx, -r, 0, r, 0, 0.5, darken(v.col, 0.2), body, light);
   ctx.fillStyle = v.flash ? '#fff' : g;
   ctx.strokeStyle = dark;
   ctx.lineWidth = 2;
