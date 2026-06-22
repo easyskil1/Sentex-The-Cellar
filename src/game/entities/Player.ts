@@ -1,10 +1,13 @@
 import type { World } from '../World';
 import type { Item } from '../content/items';
 import type { Vec2 } from '../../engine/math';
-import { normalize, clamp } from '../../engine/math';
+import { normalize, clamp, random } from '../../engine/math';
 import { Tear, type TearBehavior } from './Tear';
 import { Ring } from './Ring';
-import { PLAYER_BASE, ROOM, CHARGE, RING } from '../config';
+import { PLAYER_BASE, ROOM, CHARGE, RING, FIOLA, HP } from '../config';
+import { FIOLA_EFFECTS, type FiolaEffect } from '../content/Fiola';
+import type { CardEffect } from '../content/Card';
+import type { CharacterDef } from '../content/characters';
 import { drawPlayer, defaultBodyLook, type BodyLook } from './PlayerRenderer';
 
 /** A játékos figura: mozgás, lövés, szobaváltás, kirajzolás. */
@@ -83,8 +86,30 @@ export class Player {
    * adja le, a `fireRate` üteme szerint. Config RING.
    */
   ringMode = false;
-  /** Zavar-státusz (a Zavaró ellenfél): amíg >0, a mozgás-irány FORDÍTOTT. */
+  /** Zavar-státusz (a Zavaró ellenfél / Káprázat-fiola): amíg >0, a mozgás-irány FORDÍTOTT. */
   confusedT = 0;
+
+  // ── Fiola (#44, random-hatású fogyóeszköz) ──────────────────────────────────
+  /** A nálad lévő fiolák szín-indexei felvételi sorrendben (a HUD a következőt mutatja). */
+  fiolas: number[] = [];
+  /** Futáson belüli szín-index → hatás társítás (resetkor újrasorsolva, bijektív). */
+  fiolaMap: FiolaEffect[] = [];
+  /** Szín-index → felfedett-e már (az első kiivás után a HUD/floater elárulja). */
+  fiolaSeen: boolean[] = [];
+  /** Fürgeség-fiola: amíg >0, sebesség + tűzgyorsaság buff (FIOLA.haste*). */
+  hasteT = 0;
+  /** Dühroham-fiola: amíg >0, sebzés-bónusz aktív; lejáratkor a `rageBonus` visszavonva. */
+  rageT = 0;
+  /** A `dmg`-hez ADOTT aktuális rage-bónusz (lejáratkor pontosan ennyit veszünk vissza). */
+  rageBonus = 0;
+  /** Rossz adag-fiola: önsorsoló DoT visszalévő ideje + tick-akkumulátor (World tick-eli). */
+  selfBurnT = 0;
+  selfBurnAcc = 0;
+
+  // ── Sorslap (#46/#47, kártya/rúna fogyó) ────────────────────────────────────
+  /** A nálad lévő sorslapok hatás-id-jei felvételi sorrendben (a HUD a következőt mutatja).
+   *  A fiolával ellentétben ISMERT hatású, ezért nincs szín→hatás társítás. */
+  cards: CardEffect[] = [];
 
   hp = PLAYER_BASE.maxHp;
   maxHp = PLAYER_BASE.maxHp;
@@ -115,6 +140,11 @@ export class Player {
   collected: Item[] = [];
   /** A felvett tárgyakból számolt halmozott kinézet (a renderer ezt rajzolja). */
   bodyLook: BodyLook = defaultBodyLook();
+  /** A választott vándor (#53) alap-kinézete: a refreshLook EBBŐL indul (nem a
+   *  semleges defaultBodyLook-ból), így a vándor signature könny-színe megmarad. */
+  baseLook: BodyLook = {};
+  /** A választott vándor kezdő-erő-pontja (a difficulty.playerPower-be számít). */
+  startPower = 0;
 
   private fireCd = 0;
   lastShotDir: Vec2 = { x: 0, y: 1 };
@@ -122,7 +152,7 @@ export class Player {
   private headLean = 0;
 
   /** Teljes statisztika-visszaállítás (új játék). */
-  reset(cx: number, cy: number): void {
+  reset(cx: number, cy: number, character?: CharacterDef): void {
     Object.assign(this, {
       vx: 0, vy: 0,
       speed: PLAYER_BASE.speed, dmg: PLAYER_BASE.dmg, fireRate: PLAYER_BASE.fireRate,
@@ -141,15 +171,53 @@ export class Player {
       tnt: 1, bombs: 2,
       activeSkillId: 'nova', skillCharge: 0,
       collected: [],
+      fiolas: [], hasteT: 0, rageT: 0, rageBonus: 0, selfBurnT: 0, selfBurnAcc: 0,
+      cards: [],
     });
+    this.baseLook = {};
+    this.startPower = 0;
+    if (character) this.applyCharacter(character);
+    this.rollFiolaMap();
     this.refreshLook();
     this.x = cx;
     this.y = cy;
   }
 
+  /** A választott vándor (#53) kezdő-eltéréseinek alkalmazása az alap-statokra. */
+  private applyCharacter(c: CharacterDef): void {
+    if (c.dmgMul) this.dmg = Math.round(this.dmg * c.dmgMul);
+    if (c.speedMul) this.speed = Math.round(this.speed * c.speedMul);
+    if (c.fireRateMul) this.fireRate = this.fireRate * c.fireRateMul;
+    if (c.maxHpHearts) { this.maxHp = HP.heart * c.maxHpHearts; this.hp = this.maxHp; }
+    if (c.skillId) this.activeSkillId = c.skillId;
+    if (c.startBurn) this.burn = true;
+    if (c.tearColor) this.baseLook.tearColor = c.tearColor;
+    this.startPower = c.startPower;
+    for (let i = 0; i < (c.startFiolas ?? 0); i++) {
+      this.fiolas.push(Math.floor(random() * FIOLA_EFFECTS.length));
+    }
+  }
+
+  /**
+   * Új futás: a fiola szín→hatás társítás újrasorsolása (bijektív permutáció, mert
+   * a színek és a hatások száma egyenlő), és a felfedett-állapot nullázása. A
+   * felfedés FUTÁSONKÉNT visszaáll (klasszikus pirula-érzet, seed nélkül is megy).
+   */
+  private rollFiolaMap(): void {
+    const effects: FiolaEffect[] = FIOLA_EFFECTS.map((e) => e.id);
+    // Fisher-Yates keverés (engine-zéró-dep, helyben)
+    for (let i = effects.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [effects[i], effects[j]] = [effects[j]!, effects[i]!];
+    }
+    this.fiolaMap = effects;
+    this.fiolaSeen = effects.map(() => false);
+  }
+
   /** Újraszámolja a halmozott kinézetet a felvett tárgyakból (felvételkor/resetkor). */
   refreshLook(): void {
-    const look = defaultBodyLook();
+    // a vándor signature-kinézetéből indulunk (#53), arra halmozódnak a tárgyak
+    const look: BodyLook = { ...this.baseLook };
     for (const it of this.collected) it.mutateLook?.(look);
     this.bodyLook = look;
   }
@@ -171,7 +239,15 @@ export class Player {
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.invuln = Math.max(0, this.invuln - dt);
     this.slowT = Math.max(0, this.slowT - dt);
-    const slow = this.slowT > 0 ? this.slowMul : 1;
+    // Fiola-buffok lefutása: a haste a sebesség/tűz szorzója, a rage a sebzés-bónusz
+    // (lejáratkor PONTOSAN a hozzáadott bónuszt vesszük vissza, hogy a perkek ne ússzanak el).
+    this.hasteT = Math.max(0, this.hasteT - dt);
+    if (this.rageT > 0) {
+      this.rageT = Math.max(0, this.rageT - dt);
+      if (this.rageT === 0 && this.rageBonus > 0) { this.dmg -= this.rageBonus; this.rageBonus = 0; }
+    }
+    // sebesség-szorzó: a lassítás és a fürgeség egyszerre is hathat (kombinálódnak)
+    const slow = (this.slowT > 0 ? this.slowMul : 1) * (this.hasteT > 0 ? FIOLA.hasteSpeed : 1);
 
     const input = world.input;
 
@@ -285,9 +361,14 @@ export class Player {
     return false;
   }
 
+  /** A tényleges lövés-köz: a Fürgeség-fiola (haste) gyorsítja (FIOLA.hasteFire). */
+  private fireInterval(): number {
+    return this.fireRate * (this.hasteT > 0 ? FIOLA.hasteFire : 1);
+  }
+
   private shoot(dir: Vec2, world: World): void {
     if (this.fireCd > 0) return;
-    this.fireCd = this.fireRate;
+    this.fireCd = this.fireInterval();
     const ss = this.shotSpeed;
     const range = this.range * this.rangeMul;
     const behavior = this.tearBehavior();
@@ -366,7 +447,7 @@ export class Player {
     const mul = this.chargeMul();
     this.chargeT = 0;
     if (t < CHARGE.minTime || this.fireCd > 0) return; // túl rövid / még töltődik a ráta
-    this.fireCd = this.fireRate; // a tap-spam ellen (a sima lövéssel közös ráta)
+    this.fireCd = this.fireInterval(); // a tap-spam ellen (a sima lövéssel közös ráta)
     const dir = this.chargeDir;
     const dx = dir.x, dy = dir.y;
     const ss = this.shotSpeed * CHARGE.speedMul;
@@ -395,7 +476,7 @@ export class Player {
   /** Pecsétgyűrű (#2): utazó sebző-korong leadása a célzásirányba (a fireRate üteme szerint). */
   private shootRing(dir: Vec2, world: World): void {
     if (this.fireCd > 0) return;
-    this.fireCd = this.fireRate;
+    this.fireCd = this.fireInterval();
     const dx = dir.x, dy = dir.y;
     const ss = this.shotSpeed * RING.speedMul;
     const life = this.range * this.rangeMul; // a hatótáv mint élettartam (mint a könnynél)
@@ -449,6 +530,8 @@ export class Player {
       lean: this.headLean,
       invuln: this.invuln,
       moving: Math.hypot(this.vx, this.vy) > 20,
+      moveX: this.vx,
+      moveY: this.vy,
       look: this.bodyLook,
     });
   }

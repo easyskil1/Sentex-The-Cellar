@@ -11,6 +11,8 @@
  * állítja elő: a fal-rácsot, a start/exit pozíciót és az ellenfél-helyeket.
  */
 
+import { mulberry32 } from '../rng';
+
 /** Egy labirintus-pálya hangolható paraméterei (chapter-en tárolva, menthető). */
 export interface LabyrinthConfig {
   /** Maze-cellák vízszintesen (a tile-szélesség 2·cols+1). */
@@ -72,16 +74,7 @@ export interface Labyrinth {
   deadEnds: number;
 }
 
-// Kis determinisztikus PRNG (mulberry32) — a seedből reprodukálható maze.
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// A determinisztikus PRNG (mulberry32) közös helyen él: game/rng.ts.
 
 const DIRS: ReadonlyArray<readonly [number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 

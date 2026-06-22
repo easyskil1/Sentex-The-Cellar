@@ -14,10 +14,17 @@ import { formatTime, type LifetimeStats, type TimeRecords } from '../game/stats'
 import { drawMedal } from '../game/medal';
 import { drawEnemy } from '../game/entities/enemies/EnemyRenderer';
 import { ENEMY_STATS, type EnemyKind } from '../game/entities/enemies/enemyTypes';
-import { ENEMY_NAMES, loadBestiary, loadBossBestiary, loadPerksSeen, loadSkillsSeen } from '../game/bestiary';
+import { ENEMY_NAMES, loadBestiary, loadBossBestiary, loadPerksSeen, loadSkillsSeen, loadSetTiersSeen } from '../game/bestiary';
 import { ITEMS, itemName, itemDesc, type Item } from '../game/content/items';
+import { ITEM_SETS, SET_ORDER, type ItemSet, type SetId } from '../game/content/itemSets';
 import { SKILLS, skillName, skillDesc, type Skill } from '../game/content/skills';
 import { drawPerkIcon, drawSkillIcon } from '../game/content/itemArt';
+import { CHARACTERS, isCharacterUnlocked, type CharacterDef } from '../game/content/characters';
+import { CHALLENGES, loadClearedChallenges, type ChallengeDef } from '../game/content/challenges';
+import { ACHIEVEMENTS, loadAchievements, type AchievementDef } from '../game/content/achievements';
+import { FIOLA_EFFECTS, FIOLA_COLORS, drawFiola, loadFiolaSeen, type FiolaEffectDef } from '../game/content/Fiola';
+import { CARD_EFFECTS, drawCard, loadCardSeen, type CardDef } from '../game/content/Card';
+import { drawHoodedSigil } from '../game/level/characterSelectRender';
 import { shade } from '../engine/math';
 import { BOSS_ORDER, BOSS_REGISTRY, type BossTarget } from '../game/entities/enemies/bossRegistry';
 import type { IEnemy } from '../game/entities/enemies/Enemy';
@@ -27,12 +34,18 @@ import { getLang, setLang, onLangChange, t, type Lang } from '../i18n';
 import type { InputAction } from '../engine/Input';
 import { el, pageHeader, panel, table, toggleField, button, select, slider } from './kit';
 
+/** A Kódex fülei: a 3 eredeti (lény/boss/tárgy/rend/skill) + az 5 új tartalom-rendszer. */
+type CodexTab =
+  | 'creatures' | 'bosses' | 'perks' | 'sets' | 'skills'
+  | 'wanderers' | 'challenges' | 'feats' | 'fiolas' | 'cards';
+
 export type OverlayAction =
   | 'start' | 'resume' | 'menu' | 'admin' | 'rank' | 'bestiary' | 'settings' | 'credits' | 'edit-name'
   | 'toggle-audio' | 'reset-progress' | 'narrator' | 'toggle-fps' | 'toggle-fullscreen' | 'toggle-gamefeel' | 'toggle-hitstop' | 'toggle-thicktears'
   | 'rscale-auto' | 'rscale-100' | 'rscale-75' | 'rscale-50'
   | 'shadow-off' | 'shadow-hard' | 'shadow-soft'
   | 'admin-map' | 'admin-odds' | 'admin-enemy' | 'admin-boss' | 'admin-item' | 'admin-skill' | 'admin-balance' | 'admin-settings'
+  | 'admin-vandor' | 'admin-proba' | 'admin-seed'
   | 'offer-accept' | 'offer-decline';
 
 /** Egy felugró ajánlat-ablak (bolti vásárlás / értesítés) tartalma. */
@@ -66,10 +79,12 @@ export interface RankView {
   floorRecords: Array<{ floor: number; label: string; time: number }>;
   /** labirintus-rekordok fejezet-névvel. */
   labRecords: Array<{ label: string; time: number }>;
+  /** teljesítmények (a Game id+tier+feloldottság; az Overlays fordítja a nevet/leírást). */
+  achievements: Array<{ id: string; tier: string; unlocked: boolean }>;
 }
 
 /** A RANG hub almenüi. */
-type RankTab = 'profile' | 'records' | 'stats' | 'board';
+type RankTab = 'profile' | 'records' | 'stats' | 'board' | 'achievements';
 
 /** A BEÁLLÍTÁSOK lap adatai (a Game állítja össze minden megnyitáskor). */
 export interface SettingsView {
@@ -114,6 +129,10 @@ export interface GameOverData {
   totalScore: number;
   rankedUp: boolean;
   place: number; // ranglista-helyezés (0 = nem fért be)
+  /** A futás végén MOST feloldott teljesítmények id-jei (értesítéshez). */
+  newAchievements?: string[];
+  /** A futás seed-kódja (#49) - csak normál kampánynál; kattintásra másolható. */
+  seed?: string;
 }
 
 export class Overlays {
@@ -149,6 +168,15 @@ export class Overlays {
   private readonly nameCancel = byId('nameCancel');
   private nameCancelable = false;
   private nameFirstRun = false;
+
+  // Seed-kapu modal (#49): a HUB seed-állomása nyitja; a beírt kód a következő
+  // story-futás seedje. A callbackeket a `showSeedGate` állítja be hívásonként.
+  private readonly seedModal = byId('seedModal');
+  private readonly seedInput = byId('seedInput') as HTMLInputElement;
+  private readonly seedSet = byId('seedSet');
+  private readonly seedRandom = byId('seedRandom');
+  private seedOnSubmit: (seed: string) => void = () => {};
+  private seedOnClose: () => void = () => {};
   // RANG / BEÁLLÍTÁSOK lapok (admin-kinézetű, dinamikusan épített törzzsel)
   private readonly rank = byId('rank');
   private readonly rankBody = byId('rankBody');
@@ -160,8 +188,8 @@ export class Overlays {
   /** BESTIÁRIUM: katakomba-fal + a kijelölt lény animált renderének RAF-ja. */
   private readonly bestiary = byId('bestiary');
   private bestiaryRaf = 0;
-  /** A Kódex aktív füle (Lények / Bossok / Tárgyak / Képességek). */
-  private codexTab: 'creatures' | 'bosses' | 'perks' | 'skills' = 'creatures';
+  /** A Kódex aktív füle. */
+  private codexTab: CodexTab = 'creatures';
   /** Boss-előnézet példányok cache-e (a draw-hoz; nem frissül, statikus póz). */
   private readonly bossPreviews = new Map<BossTarget, IEnemy>();
   private readonly settings = byId('settings');
@@ -222,6 +250,36 @@ export class Overlays {
       if (cleaned !== this.nameInput.value) this.nameInput.value = cleaned;
     });
     this.nameModal.addEventListener('click', (e) => { if (e.target === this.nameModal) cancel(); });
+
+    // Seed-kapu modal (#49): BEÁLLÍT a beírt seedet rögzíti, VÉLETLEN ürre állít
+    // (friss random futás), Esc/MÉGSEM/háttér-kattintás változatlanul zár.
+    const seedClose = () => { this.seedModal.classList.add('hidden'); this.seedOnClose(); };
+    const seedSubmit = (value: string) => { this.seedOnSubmit(value); seedClose(); };
+    this.seedSet.addEventListener('click', () => seedSubmit(this.seedInput.value));
+    this.seedRandom.addEventListener('click', () => seedSubmit(''));
+    this.seedInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); seedSubmit(this.seedInput.value); }
+      else if (e.key === 'Escape') { e.preventDefault(); seedClose(); }
+    });
+    // élő szűrés: csak betű/szám/kötőjel, kisbetűsítve, ésszerű hossz (megosztható kód)
+    this.seedInput.addEventListener('input', () => {
+      const cleaned = this.seedInput.value.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 16);
+      if (cleaned !== this.seedInput.value) this.seedInput.value = cleaned;
+    });
+    this.seedModal.addEventListener('click', (e) => { if (e.target === this.seedModal) seedClose(); });
+  }
+
+  /**
+   * HUB seed-kapu (#49): modal a KÖVETKEZŐ story-futás seedjének megadásához.
+   * `current` az előtöltött kód (üres = random). `onSubmit` a kiválasztott kódot
+   * adja (üres string = random), `onClose` MINDEN záráskor fut (a hub feloldásához).
+   */
+  showSeedGate(current: string, onSubmit: (seed: string) => void, onClose: () => void): void {
+    this.seedOnSubmit = onSubmit;
+    this.seedOnClose = onClose;
+    this.seedInput.value = current;
+    this.seedModal.classList.remove('hidden');
+    setTimeout(() => this.seedInput.focus(), 0);
   }
 
   hideAll(): void {
@@ -233,6 +291,7 @@ export class Overlays {
     this.adminBody.classList.add('hidden');
     this.itemoffer.classList.add('hidden');
     this.nameModal.classList.add('hidden');
+    this.seedModal.classList.add('hidden');
     this.rank.classList.add('hidden');
     this.bestiary.classList.add('hidden');
     if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
@@ -280,7 +339,7 @@ export class Overlays {
   }
 
   /** Aktív admin-almenü fül kiemelése. */
-  setAdminTab(tab: 'map' | 'odds' | 'enemy' | 'boss' | 'item' | 'skill' | 'balance' | 'settings'): void {
+  setAdminTab(tab: 'map' | 'odds' | 'enemy' | 'boss' | 'item' | 'skill' | 'balance' | 'settings' | 'vandor' | 'proba' | 'seed'): void {
     document.getElementById('adminTabMap')?.classList.toggle('active', tab === 'map');
     document.getElementById('adminTabEnemy')?.classList.toggle('active', tab === 'enemy');
     document.getElementById('adminTabBoss')?.classList.toggle('active', tab === 'boss');
@@ -288,6 +347,9 @@ export class Overlays {
     document.getElementById('adminTabSkill')?.classList.toggle('active', tab === 'skill');
     document.getElementById('adminTabOdds')?.classList.toggle('active', tab === 'odds');
     document.getElementById('adminTabBalance')?.classList.toggle('active', tab === 'balance');
+    document.getElementById('adminTabVandor')?.classList.toggle('active', tab === 'vandor');
+    document.getElementById('adminTabProba')?.classList.toggle('active', tab === 'proba');
+    document.getElementById('adminTabSeed')?.classList.toggle('active', tab === 'seed');
     document.getElementById('adminTabSettings')?.classList.toggle('active', tab === 'settings');
   }
 
@@ -343,6 +405,7 @@ export class Overlays {
       this.rankTabBtn('profile', t('rank.tab.profile')),
       this.rankTabBtn('records', t('rank.tab.records')),
       this.rankTabBtn('stats', t('rank.tab.stats')),
+      this.rankTabBtn('achievements', t('rank.tab.achievements')),
       this.rankTabBtn('board', t('rank.tab.board')),
     );
 
@@ -351,6 +414,7 @@ export class Overlays {
       this.rankTab === 'profile' ? [t('rank.profile.title'), t('rank.profile.sub'), this.rankProfile(view)]
       : this.rankTab === 'records' ? [t('rank.records.title'), t('rank.records.sub'), this.rankRecords(view)]
       : this.rankTab === 'stats' ? [t('rank.stats.title'), t('rank.stats.sub'), this.rankStats(view)]
+      : this.rankTab === 'achievements' ? [t('rank.ach.title'), t('rank.ach.sub'), this.rankAchievements(view)]
       : [t('rank.board.title'), t('rank.board.sub'), this.rankBoard(view)] as [string, string, HTMLElement];
 
     this.rankBody.replaceChildren(el('div', { class: 'adm-page' }, [
@@ -389,6 +453,23 @@ export class Overlays {
         ]),
       ]),
     ]);
+  }
+
+  /** Teljesítmény-almenü: a feloldott/zárt teljesítmények rácsa (tier-színnel). */
+  private rankAchievements(view: RankView): HTMLElement {
+    const done = view.achievements.filter((a) => a.unlocked).length;
+    const total = view.achievements.length;
+    const tiles = view.achievements.map((a) => {
+      const cls = `ach-tile ach-${a.tier}${a.unlocked ? '' : ' locked'}`;
+      return el('div', { class: cls }, [
+        el('div', { class: 'ach-mark', text: a.unlocked ? '★' : '🔒' }),
+        el('div', { class: 'ach-text' }, [
+          el('div', { class: 'ach-name', text: a.unlocked ? t(`ach.${a.id}.name`) : '???' }),
+          el('div', { class: 'ach-desc', text: t(`ach.${a.id}.desc`) }),
+        ]),
+      ]);
+    });
+    return panel(t('rank.ach.count', { done, total }), [el('div', { class: 'ach-grid' }, tiles)]);
   }
 
   /** Rekord-almenü: csúcs-mutatók + szintenkénti és labirintus-leggyorsabb idők. */
@@ -483,11 +564,17 @@ export class Overlays {
     const tab = this.codexTab;
 
     // Fül-sor a FELSŐ admin-bar-ba (mint a Rang/Beállítások füleı), nem a törzsbe
-    const tabDefs: Array<{ id: 'creatures' | 'bosses' | 'perks' | 'skills'; label: string }> = [
+    const tabDefs: Array<{ id: CodexTab; label: string }> = [
       { id: 'creatures', label: t('best.creatures') },
       { id: 'bosses', label: t('best.bosses') },
       { id: 'perks', label: t('codex.perks') },
+      { id: 'sets', label: t('codex.sets') },
       { id: 'skills', label: t('codex.skills') },
+      { id: 'wanderers', label: t('codex.wanderers') },
+      { id: 'challenges', label: t('codex.challenges') },
+      { id: 'feats', label: t('codex.feats') },
+      { id: 'fiolas', label: t('codex.fiolas') },
+      { id: 'cards', label: t('codex.cards') },
     ];
     const tabBar = byId('codexTabs');
     tabBar.replaceChildren(...tabDefs.map((d) => {
@@ -558,7 +645,26 @@ export class Overlays {
         });
         wall.append(niche);
       }
-    } else {
+    } else if (tab === 'sets') {
+      // RENDEK: a szett akkor „felfedezett", ha legalább 1 tagját (tárgyát) ismered.
+      const seen = loadPerksSeen();
+      const tiersSeen = loadSetTiersSeen();
+      const setList = SET_ORDER.map((id) => ITEM_SETS[id]);
+      const discovered = (s: ItemSet): boolean => this.setMembers(s.id).some((it) => seen.has(it.name));
+      unlockedN = setList.filter(discovered).length; totalN = setList.length;
+      for (const s of setList) {
+        const open = discovered(s);
+        const niche = el('button', { class: open ? 'best-niche' : 'best-niche locked' });
+        const c = this.nicheCanvas();
+        this.drawSetEmblem(c, s, open, 22);
+        niche.append(c, el('span', { class: 'best-niche-name', text: open ? t(s.nameKey) : '???' }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectSet(s, open, seen, tiersSeen, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      }
+    } else if (tab === 'skills') {
       const seen = loadSkillsSeen();
       unlockedN = SKILLS.filter((s) => seen.has(s.id)).length; totalN = SKILLS.length;
       for (const skill of SKILLS) {
@@ -570,6 +676,87 @@ export class Overlays {
         niche.addEventListener('click', () => {
           clearActive(); niche.classList.add('active');
           this.selectSkill(skill, open, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      }
+    } else if (tab === 'wanderers') {
+      // VÁNDOROK (#53): feloldás = nincs feltétel, vagy a feltétel-érdem megvan
+      unlockedN = CHARACTERS.filter(isCharacterUnlocked).length; totalN = CHARACTERS.length;
+      for (const ch of CHARACTERS) {
+        const open = isCharacterUnlocked(ch);
+        const niche = el('button', { class: open ? 'best-niche' : 'best-niche locked' });
+        const c = this.nicheCanvas();
+        this.drawWandererFigure(c, ch, open);
+        niche.append(c, el('span', { class: 'best-niche-name', text: open ? t(`char.${ch.id}.name`) : '???' }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectWanderer(ch, open, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      }
+    } else if (tab === 'challenges') {
+      // PRÓBÁK (#51): mind látható; a „felfedett" = teljesített (✓), a count is azt méri
+      const cleared = loadClearedChallenges();
+      unlockedN = CHALLENGES.filter((c) => cleared.has(c.id)).length; totalN = CHALLENGES.length;
+      for (const ch of CHALLENGES) {
+        const done = cleared.has(ch.id);
+        const niche = el('button', { class: 'best-niche' });
+        const c = this.nicheCanvas();
+        this.drawChallengeFigure(c, ch, done);
+        const label = t(`challenge.${ch.id}.name`) + (done ? ' ✓' : '');
+        niche.append(c, el('span', { class: 'best-niche-name', text: label }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectChallenge(ch, done, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      }
+    } else if (tab === 'feats') {
+      // ÉRDEMEK (Ú3): a zárt bejegyzés a NEVÉT rejti, de a feltételt (leírást) mutatja
+      const earned = loadAchievements();
+      unlockedN = ACHIEVEMENTS.filter((a) => earned.has(a.id)).length; totalN = ACHIEVEMENTS.length;
+      for (const a of ACHIEVEMENTS) {
+        const open = earned.has(a.id);
+        const niche = el('button', { class: open ? 'best-niche' : 'best-niche locked' });
+        const c = this.nicheCanvas();
+        this.drawFeatFigure(c, a, open, 26);
+        niche.append(c, el('span', { class: 'best-niche-name', text: open ? t(`ach.${a.id}.name`) : '???' }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectFeat(a, open, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      }
+    } else if (tab === 'fiolas') {
+      // FIOLÁK (#44): a hatás futásonként random szín mögött; a Kódex a HATÁST tárja
+      // fel (futásokon át, az első kiivás után), a per-futás találgatás megmarad
+      const seen = loadFiolaSeen();
+      unlockedN = FIOLA_EFFECTS.filter((f) => seen.has(f.id)).length; totalN = FIOLA_EFFECTS.length;
+      FIOLA_EFFECTS.forEach((f, i) => {
+        const open = seen.has(f.id);
+        const niche = el('button', { class: open ? 'best-niche' : 'best-niche locked' });
+        const c = this.nicheCanvas();
+        this.drawFiolaFigure(c, i, open);
+        niche.append(c, el('span', { class: 'best-niche-name', text: open ? t(f.nameKey) : '???' }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectFiola(f, i, open, detailCanvas, detailName, detailStats, detailHint);
+        });
+        wall.append(niche);
+      });
+    } else if (tab === 'cards') {
+      // SORSLAPOK (#46/#47): ismert hatású, felvételkor felfedve
+      const seen = loadCardSeen();
+      unlockedN = CARD_EFFECTS.filter((c) => seen.has(c.id)).length; totalN = CARD_EFFECTS.length;
+      for (const cd of CARD_EFFECTS) {
+        const open = seen.has(cd.id);
+        const niche = el('button', { class: open ? 'best-niche' : 'best-niche locked' });
+        const c = this.nicheCanvas();
+        this.drawCardFigure(c, cd, open, 26);
+        niche.append(c, el('span', { class: 'best-niche-name', text: open ? t(cd.nameKey) : '???' }));
+        niche.addEventListener('click', () => {
+          clearActive(); niche.classList.add('active');
+          this.selectCard(cd, open, detailCanvas, detailName, detailStats, detailHint);
         });
         wall.append(niche);
       }
@@ -719,7 +906,13 @@ export class Overlays {
       return;
     }
     nameEl.textContent = itemName(item);
-    statsEl.replaceChildren(el('span', { class: 'best-stat', text: itemDesc(item) }));
+    const stats: HTMLElement[] = [el('span', { class: 'best-stat', text: itemDesc(item) })];
+    // kereszt-hivatkozás: melyik Rend(ek)be tartozik a tárgy (a RENDEK fülre mutat)
+    for (const id of item.tags ?? []) {
+      const s = ITEM_SETS[id];
+      stats.push(el('span', { class: 'best-stat set-ref', text: `${t('codex.setBelongs')}: ${t(s.nameKey)}`, style: `color:${s.color}` }));
+    }
+    statsEl.replaceChildren(...stats);
     hintEl.textContent = '';
     const start = performance.now();
     const tick = (now: number): void => {
@@ -727,6 +920,92 @@ export class Overlays {
       this.bestiaryRaf = requestAnimationFrame(tick);
     };
     this.bestiaryRaf = requestAnimationFrame(tick);
+  }
+
+  /** Egy szett (Rend) tag-tárgyai (a `tags` alapján), Kódex-sorrendben. */
+  private setMembers(id: SetId): Item[] {
+    return ITEMS.filter((it) => it.tags?.includes(id));
+  }
+
+  /**
+   * Egy szett-címer a megadott canvasra: gótikus pecsét a Rend színében (külső
+   * ragyogás + sötét korong + színes gyűrű + belső rombusz-rúna). Zárva: „?".
+   */
+  private drawSetEmblem(c: HTMLCanvasElement, set: ItemSet, open: boolean, r: number): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    if (!open) { this.drawLocked(c); return; }
+    ctx.clearRect(0, 0, c.width, c.height);
+    const cx = c.width / 2, cy = c.height / 2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    // külső ragyogás
+    const glow = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, r * 1.25);
+    glow.addColorStop(0, set.color + '55');
+    glow.addColorStop(1, set.color + '00');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.25, 0, Math.PI * 2); ctx.fill();
+    // sötét korong
+    ctx.fillStyle = shade(set.color, -0.66);
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.82, 0, Math.PI * 2); ctx.fill();
+    // színes gyűrű
+    ctx.strokeStyle = set.color;
+    ctx.lineWidth = Math.max(2, r * 0.1);
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.82, 0, Math.PI * 2); ctx.stroke();
+    // belső rombusz-rúna
+    ctx.fillStyle = set.color;
+    ctx.beginPath();
+    ctx.moveTo(0, -r * 0.42); ctx.lineTo(r * 0.34, 0); ctx.lineTo(0, r * 0.42); ctx.lineTo(-r * 0.34, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = shade(set.color, 0.5);
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.13, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  /**
+   * A kijelölt Rend részletezése: címer + tag-tárgyak (felfedezés-kapu a felvett
+   * tárgyak alapján) + a tier-bónuszok (a hatás CSAK az első aktiválás után tárul
+   * fel, addig „???"). A `seen` = felvett tárgyak, a `tiersSeen` = aktivált tierek.
+   */
+  private selectSet(
+    set: ItemSet, open: boolean, seen: Set<string>, tiersSeen: Set<string>,
+    canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement,
+  ): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    if (!open) {
+      nameEl.textContent = t('best.locked');
+      statsEl.replaceChildren();
+      hintEl.textContent = t('codex.setHint');
+      this.drawLocked(canvas);
+      return;
+    }
+    nameEl.textContent = t(set.nameKey);
+    hintEl.textContent = '';
+    this.drawSetEmblem(canvas, set, true, 56);
+    // Tagok: minden tag-tárgy ikonja (zárva sötét, ha még nem vetted fel)
+    const memberEls = this.setMembers(set.id).map((it) => {
+      const mseen = seen.has(it.name);
+      const mc = document.createElement('canvas');
+      mc.className = 'set-member-canvas';
+      mc.width = 48; mc.height = 48;
+      this.drawPerkFigure(mc, it, mseen, 17, 0);
+      return el('div', { class: mseen ? 'set-member' : 'set-member locked', title: mseen ? itemName(it) : '???' }, [mc]);
+    });
+    // Bónuszok: tier-soronként küszöb → hatás (a hatás csak aktiválás után)
+    const tierEls = set.tiers.map((tier) => {
+      const known = tiersSeen.has(`${set.id}:${tier.need}`);
+      return el('div', { class: known ? 'set-tier' : 'set-tier locked' }, [
+        el('span', { class: 'set-tier-need', text: t('codex.setTierNeed', { n: tier.need }), style: `color:${set.color}` }),
+        el('span', { class: 'set-tier-arrow', text: '→' }),
+        el('span', { class: 'set-tier-bonus', text: known ? t(tier.descKey) : `??? · ${t('codex.setLockedBonus')}` }),
+      ]);
+    });
+    statsEl.replaceChildren(el('div', { class: 'set-detail' }, [
+      el('div', { class: 'set-sub', text: t('codex.setMembers') }),
+      el('div', { class: 'set-members' }, memberEls),
+      el('div', { class: 'set-sub', text: t('codex.setBonuses') }),
+      el('div', { class: 'set-tiers' }, tierEls),
+    ]));
   }
 
   /** Egy skill animált ikonja a megadott canvasra (zárva sötét sziluett). */
@@ -754,6 +1033,270 @@ export class Overlays {
     const start = performance.now();
     const tick = (now: number): void => {
       this.drawSkillFigure(canvas, skill, true, 46, (now - start) / 1000);
+      this.bestiaryRaf = requestAnimationFrame(tick);
+    };
+    this.bestiaryRaf = requestAnimationFrame(tick);
+  }
+
+  // ---- Kódex: Vándorok (#53) ----
+
+  /** Egy vándor csuklyás avatárja a fülkébe (zárva sötét „?"). */
+  private drawWandererFigure(c: HTMLCanvasElement, ch: CharacterDef, open: boolean): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    if (!open) { this.drawLocked(c); return; }
+    ctx.clearRect(0, 0, c.width, c.height);
+    drawHoodedSigil(ctx, c.width / 2, c.height / 2 + 4, ch.accent, ch.tearColor, 0.5);
+  }
+
+  /** A kijelölt vándor részletezése: avatár (pulzáló halo) + leírás + stat-irányok + skill. */
+  private selectWanderer(ch: CharacterDef, open: boolean, canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    if (!open) {
+      nameEl.textContent = t('best.locked');
+      statsEl.replaceChildren(el('span', { class: 'best-stat', text: t('char.locked') }));
+      hintEl.textContent = t('codex.wandererHint');
+      this.drawLocked(canvas);
+      return;
+    }
+    nameEl.textContent = t(`char.${ch.id}.name`);
+    // stat-irány: ▲ jobb / ▼ rosszabb / = alap. A tűzgyorsaságnál a >1 szorzó RITKÁBB
+    // tűz (rosszabb), ezért az irányt ott megfordítjuk.
+    const dirSpan = (label: string, dir: number): HTMLElement =>
+      el('span', { class: 'best-stat', text: `${label}: ${dir > 0 ? '▲' : dir < 0 ? '▼' : '='}`,
+        style: `color:${dir > 0 ? '#9ad88a' : dir < 0 ? '#e08a6a' : 'rgba(220,205,170,0.72)'}` });
+    const sk = SKILLS.find((s) => s.id === (ch.skillId ?? ''));
+    statsEl.replaceChildren(
+      el('span', { class: 'best-stat', text: t(`char.${ch.id}.desc`) }),
+      dirSpan(t('char.stat.dmg'), Math.sign((ch.dmgMul ?? 1) - 1)),
+      dirSpan(t('char.stat.spd'), Math.sign((ch.speedMul ?? 1) - 1)),
+      dirSpan(t('char.stat.rate'), -Math.sign((ch.fireRateMul ?? 1) - 1)),
+      dirSpan(t('char.stat.hp'), Math.sign((ch.maxHpHearts ?? 3) - 3)),
+      el('span', { class: 'best-stat', text: t('char.skillLabel', { skill: sk ? skillName(sk) : t('codex.skillNone') }) }),
+    );
+    hintEl.textContent = '';
+    const start = performance.now();
+    const tick = (now: number): void => {
+      const ts = (now - start) / 1000;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2 + 12);
+        ctx.scale(2, 2);
+        drawHoodedSigil(ctx, 0, 0, ch.accent, ch.tearColor, 0.5 + 0.5 * Math.sin(ts * 2.2));
+        ctx.restore();
+      }
+      this.bestiaryRaf = requestAnimationFrame(tick);
+    };
+    this.bestiaryRaf = requestAnimationFrame(tick);
+  }
+
+  // ---- Kódex: Próbák (#51) ----
+
+  /** Kihívás-gyémánt (accent-színű, fazettás): teljesítve fényesebb, egyébként tompa. */
+  private drawChallengeGem(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, accent: string, done: boolean): void {
+    ctx.save();
+    ctx.translate(cx, cy);
+    const glow = ctx.createRadialGradient(0, 0, r * 0.2, 0, 0, r * 1.4);
+    glow.addColorStop(0, accent + (done ? '88' : '40'));
+    glow.addColorStop(1, accent + '00');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.4, 0, Math.PI * 2); ctx.fill();
+    // gyémánt-sziluett
+    ctx.beginPath();
+    ctx.moveTo(0, -r); ctx.lineTo(r * 0.72, -r * 0.18); ctx.lineTo(0, r); ctx.lineTo(-r * 0.72, -r * 0.18);
+    ctx.closePath();
+    if (done) {
+      const g = ctx.createLinearGradient(0, -r, 0, r);
+      g.addColorStop(0, shade(accent, 0.45));
+      g.addColorStop(1, shade(accent, -0.4));
+      ctx.fillStyle = g;
+    } else {
+      ctx.fillStyle = shade(accent, -0.55);
+    }
+    ctx.fill();
+    ctx.strokeStyle = done ? accent : shade(accent, -0.1);
+    ctx.lineWidth = Math.max(1.5, r * 0.08);
+    ctx.stroke();
+    // fazetta-vonalak
+    ctx.strokeStyle = accent + '99';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.72, -r * 0.18); ctx.lineTo(r * 0.72, -r * 0.18);
+    ctx.moveTo(0, -r); ctx.lineTo(0, r);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawChallengeFigure(c: HTMLCanvasElement, ch: ChallengeDef, done: boolean): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    this.drawChallengeGem(ctx, c.width / 2, c.height / 2, 21, ch.accent, done);
+  }
+
+  /** A kijelölt próba részletezése: leírás + pont-szorzó + teljesítve-állapot. */
+  private selectChallenge(ch: ChallengeDef, done: boolean, canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    nameEl.textContent = t(`challenge.${ch.id}.name`);
+    statsEl.replaceChildren(
+      el('span', { class: 'best-stat', text: t(`challenge.${ch.id}.desc`) }),
+      el('span', { class: 'best-stat', text: t('codex.scoreMul', { mul: ch.scoreMul }), style: `color:${ch.accent}` }),
+      el('span', { class: 'best-stat', text: done ? t('codex.cleared') : t('codex.notCleared'),
+        style: `color:${done ? '#9ad88a' : 'rgba(220,205,170,0.72)'}` }),
+    );
+    hintEl.textContent = '';
+    const start = performance.now();
+    const tick = (now: number): void => {
+      const ts = (now - start) / 1000;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        this.drawChallengeGem(ctx, canvas.width / 2, canvas.height / 2, 48 + Math.sin(ts * 2) * 2, ch.accent, done);
+      }
+      this.bestiaryRaf = requestAnimationFrame(tick);
+    };
+    this.bestiaryRaf = requestAnimationFrame(tick);
+  }
+
+  // ---- Kódex: Érdemek (Ú3) ----
+
+  private featTierColor(tier: string): string {
+    return tier === 'gold' ? '#ecc94b' : tier === 'silver' ? '#cdd3dc' : '#c0814a';
+  }
+
+  /** Tier-medál: feloldva színes ragyogó ★, zárva tompa korong „?"-lel. */
+  private drawMedallion(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, col: string, open: boolean): void {
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (open) { ctx.shadowColor = col; ctx.shadowBlur = 10; }
+    const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.2, 0, 0, r);
+    g.addColorStop(0, open ? shade(col, 0.4) : '#3a3630');
+    g.addColorStop(1, open ? shade(col, -0.42) : '#23201c');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = open ? col : 'rgba(160,150,130,0.4)';
+    ctx.lineWidth = Math.max(2, r * 0.12);
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.94, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = open ? shade(col, 0.55) : 'rgba(200,190,170,0.5)';
+    ctx.font = `bold ${Math.round(r * 0.92)}px Georgia, serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(open ? '★' : '?', 0, r * 0.06);
+    ctx.restore();
+  }
+
+  private drawFeatFigure(c: HTMLCanvasElement, a: AchievementDef, open: boolean, r: number): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    this.drawMedallion(ctx, c.width / 2, c.height / 2, r, this.featTierColor(a.tier), open);
+  }
+
+  /** A kijelölt érdem részletezése: a feltétel (leírás) MINDIG látszik (a név csak feloldva). */
+  private selectFeat(a: AchievementDef, open: boolean, canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    nameEl.textContent = open ? t(`ach.${a.id}.name`) : t('best.locked');
+    statsEl.replaceChildren(
+      el('span', { class: 'best-stat', text: t(`ach.${a.id}.desc`) }),
+      el('span', { class: 'best-stat', text: t(`codex.tier.${a.tier}`), style: `color:${this.featTierColor(a.tier)}` }),
+      el('span', { class: 'best-stat', text: open ? t('codex.unlocked') : t('codex.lockedShort'),
+        style: `color:${open ? '#9ad88a' : 'rgba(220,205,170,0.72)'}` }),
+    );
+    hintEl.textContent = open ? '' : t('codex.featHint');
+    const col = this.featTierColor(a.tier);
+    const start = performance.now();
+    const tick = (now: number): void => {
+      const ts = (now - start) / 1000;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        this.drawMedallion(ctx, canvas.width / 2, canvas.height / 2, 54 + (open ? Math.sin(ts * 2) * 2 : 0), col, open);
+      }
+      this.bestiaryRaf = requestAnimationFrame(tick);
+    };
+    this.bestiaryRaf = requestAnimationFrame(tick);
+  }
+
+  // ---- Kódex: Fiolák (#44) ----
+
+  /** A Kódex display-színe egy fiola-hatáshoz (STABIL, NEM a per-futás szín→hatás
+   *  társítás - csak a bejegyzés-ikon színe; a játékbeli találgatást nem szivárogtatja). */
+  private drawFiolaFigure(c: HTMLCanvasElement, idx: number, open: boolean): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    if (!open) { this.drawLocked(c); return; }
+    ctx.clearRect(0, 0, c.width, c.height);
+    drawFiola(ctx, c.width / 2, c.height / 2 - 2, 19, FIOLA_COLORS[idx % FIOLA_COLORS.length]!, { glow: true });
+  }
+
+  /** A kijelölt fiola-hatás részletezése: leírás + jótékony/ártalmas jelzés. */
+  private selectFiola(f: FiolaEffectDef, idx: number, open: boolean, canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    if (!open) {
+      nameEl.textContent = t('best.locked');
+      statsEl.replaceChildren();
+      hintEl.textContent = t('codex.fiolaHint');
+      this.drawLocked(canvas);
+      return;
+    }
+    nameEl.textContent = t(f.nameKey);
+    statsEl.replaceChildren(
+      el('span', { class: 'best-stat', text: t(f.descKey) }),
+      el('span', { class: 'best-stat', text: f.good ? t('codex.good') : t('codex.bad'),
+        style: `color:${f.good ? '#9ad88a' : '#e08a6a'}` }),
+    );
+    hintEl.textContent = '';
+    const col = FIOLA_COLORS[idx % FIOLA_COLORS.length]!;
+    const start = performance.now();
+    const tick = (now: number): void => {
+      const ts = (now - start) / 1000;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawFiola(ctx, canvas.width / 2, canvas.height / 2 + 8, 44, col, { glow: true, rot: Math.sin(ts * 1.5) * 0.08 });
+      }
+      this.bestiaryRaf = requestAnimationFrame(tick);
+    };
+    this.bestiaryRaf = requestAnimationFrame(tick);
+  }
+
+  // ---- Kódex: Sorslapok (#46/#47) ----
+
+  private drawCardFigure(c: HTMLCanvasElement, def: CardDef, open: boolean, r: number): void {
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    if (!open) { this.drawLocked(c); return; }
+    ctx.clearRect(0, 0, c.width, c.height);
+    drawCard(ctx, c.width / 2, c.height / 2, r, def, { glow: true });
+  }
+
+  /** A kijelölt sorslap részletezése: leírás + lap/rúna típus. */
+  private selectCard(def: CardDef, open: boolean, canvas: HTMLCanvasElement, nameEl: HTMLElement, statsEl: HTMLElement, hintEl: HTMLElement): void {
+    if (this.bestiaryRaf) { cancelAnimationFrame(this.bestiaryRaf); this.bestiaryRaf = 0; }
+    if (!open) {
+      nameEl.textContent = t('best.locked');
+      statsEl.replaceChildren();
+      hintEl.textContent = t('codex.cardHint');
+      this.drawLocked(canvas);
+      return;
+    }
+    nameEl.textContent = t(def.nameKey);
+    statsEl.replaceChildren(
+      el('span', { class: 'best-stat', text: t(def.descKey) }),
+      el('span', { class: 'best-stat', text: def.kind === 'rune' ? t('codex.kindRune') : t('codex.kindCard'),
+        style: `color:${def.col}` }),
+    );
+    hintEl.textContent = '';
+    const start = performance.now();
+    const tick = (now: number): void => {
+      const ts = (now - start) / 1000;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawCard(ctx, canvas.width / 2, canvas.height / 2, 56, def, { glow: true, rot: Math.sin(ts * 1.2) * 0.06 });
+      }
       this.bestiaryRaf = requestAnimationFrame(tick);
     };
     this.bestiaryRaf = requestAnimationFrame(tick);
@@ -1076,7 +1619,23 @@ export class Overlays {
       ? `<span class="newbest">${t('go.deepest')}</span>`
       : t('go.deepestSoFar', { floor: d.bestFloor });
     const placePart = d.place > 0 ? t('go.place', { n: d.place }) : '';
-    this.finalBest.innerHTML = bestPart + placePart;
+    // MOST feloldott teljesítmények (a Game az id-ket küldi, itt fordítjuk)
+    const ach = d.newAchievements ?? [];
+    const achPart = ach.length
+      ? `<br><span class="newbest">${t('go.newAch', { names: ach.map((id) => t(`ach.${id}.name`)).join(', ') })}</span>`
+      : '';
+    // Seed-kód (#49): kattintásra a vágólapra másol, hogy a futás megosztható/újrajátszható.
+    const seedPart = d.seed
+      ? `<br><span class="go-seed" role="button" tabindex="0" title="${t('go.seed', { seed: d.seed })}">${t('go.seed', { seed: d.seed })}</span>`
+      : '';
+    this.finalBest.innerHTML = bestPart + placePart + achPart + seedPart;
+    if (d.seed) {
+      const el = this.finalBest.querySelector<HTMLElement>('.go-seed');
+      el?.addEventListener('click', () => {
+        navigator.clipboard?.writeText(d.seed!).catch(() => {});
+        el.textContent = t('go.seedCopied');
+      });
+    }
     this.gameover.classList.remove('hidden');
   }
 }

@@ -434,6 +434,7 @@ export function drawBossPortal(
  */
 export function drawPortalLock(
   ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number,
+  label = tr('gate.soon'),
 ): void {
   ctx.save();
 
@@ -467,7 +468,7 @@ export function drawPortalLock(
   ctx.shadowColor = 'rgba(0,0,0,0.9)';
   ctx.shadowBlur = 3;
   ctx.fillStyle = '#cdbb9a';
-  ctx.fillText(tr('gate.soon'), cx, cy + r * 0.62);
+  ctx.fillText(label, cx, cy + r * 0.62);
   ctx.shadowBlur = 0;
   ctx.textAlign = 'start';
   ctx.textBaseline = 'alphabetic';

@@ -4,11 +4,13 @@ import { skillName } from './content/skills';
 import type { World } from './World';
 import type { Player } from './entities/Player';
 import { drawHeart, drawBombIcon, drawCoinIcon } from './entities/Pickup';
+import { drawFiola, FIOLA_COLORS } from './content/Fiola';
+import { drawCard, CARD_BY_ID } from './content/Card';
 import { HP } from './config';
 import { clamp } from '../engine/math';
 import { SKILL_BY_ID } from './content/skills';
-import { pillLook } from './content/items';
-import { drawPill } from './content/Pill';
+import { setProgress } from './content/itemSets';
+import { drawItemIcon } from './content/itemIcon';
 import { formatTime } from './stats';
 
 const TAU = Math.PI * 2;
@@ -32,8 +34,9 @@ const LX = 15;
 // A bal oldali blokkok közös szélessége (statok és tabletták egyforma szélesek).
 const COLW = 224;
 // A minimap felső éle (px). A pont/szint a jobb felső sarokban van; ez alá kerül
-// a fölé igazított két idő-óra, majd alatta a minimap (lásd drawTimers/drawMinimap).
-const MAP_TOP = 112;
+// a fölé igazított idő-óra-stack (ÖSSZ/SZOBA/PÁLYA), majd alatta a minimap
+// (lásd drawTimers/drawMinimap). A három sornak helyet adva tolódott lejjebb.
+const MAP_TOP = 130;
 
 /** Képkockák közti animáció-állapot (sebzés-villanás, érme-pop, skill-burst). */
 const anim = {
@@ -42,6 +45,8 @@ const anim = {
   prevCoins: -1, coin: 0,
   prevBombs: -1, bomb: 0,
   prevTnt: -1, tnt: 0,
+  prevFiolas: -1, fiola: 0,
+  prevCards: -1, card: 0,
   prevReady: false, burst: 0,
 };
 
@@ -72,7 +77,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, world: World, best: numbe
     ctx.font = `600 12px ${SERIF}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(cheats.join('  ·  '), LX, 84); // a szívek (hy=30) + erőforrás-sor alatt
+    ctx.fillText(cheats.join('  ·  '), LX, 102); // a két erőforrás-sor (hy=30 → ry2≈84) alatt
   }
 
   // ---- pont + szint (jobb felül, Cinzel) ----
@@ -86,7 +91,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, world: World, best: numbe
   ctx.fillText(world.floorName().toUpperCase(), w - 26, 62);
   ctx.textAlign = 'left';
 
-  if (!world.isLabyrinth) drawMinimap(ctx, world, w, t); // labirintusban nincs szoba-térkép
+  if (!world.isLabyrinth && !world.isBossRush && !world.isDungeonRun) drawMinimap(ctx, world, w, t); // különleges módok: nincs szoba-térkép
   drawTimers(ctx, world, w); // idő-órák a minimap fölött (labirintusban: labirintus-óra)
   if (world.isSandbox) drawSandboxInfo(ctx, world); // teszt-aréna: szint · szorzó · valós sebzés
 
@@ -264,6 +269,10 @@ export function drawPlayerHud(ctx: CanvasRenderingContext2D, p: Player, w: numbe
   anim.prevBombs = p.bombs;
   if (anim.prevTnt >= 0 && p.tnt > anim.prevTnt) anim.tnt = 1;
   anim.prevTnt = p.tnt;
+  if (anim.prevFiolas >= 0 && p.fiolas.length > anim.prevFiolas) anim.fiola = 1;
+  anim.prevFiolas = p.fiolas.length;
+  if (anim.prevCards >= 0 && p.cards.length > anim.prevCards) anim.card = 1;
+  anim.prevCards = p.cards.length;
   const skill = p.activeSkillId ? SKILL_BY_ID[p.activeSkillId] : undefined;
   const ready = !!skill && p.skillCharge >= skill.chargeMax;
   if (ready && !anim.prevReady) anim.burst = 1;
@@ -272,6 +281,8 @@ export function drawPlayerHud(ctx: CanvasRenderingContext2D, p: Player, w: numbe
   anim.coin = Math.max(0, anim.coin - dt * 4);
   anim.bomb = Math.max(0, anim.bomb - dt * 4);
   anim.tnt = Math.max(0, anim.tnt - dt * 4);
+  anim.fiola = Math.max(0, anim.fiola - dt * 4);
+  anim.card = Math.max(0, anim.card - dt * 4);
   anim.burst = Math.max(0, anim.burst - dt * 1.6);
 
   ctx.save();
@@ -326,14 +337,25 @@ export function drawPlayerHud(ctx: CanvasRenderingContext2D, p: Player, w: numbe
     ctx.restore();
   }
 
-  // ---- erőforrás-sor: érme · bomba · TNT ----
+  // ---- erőforrás-blokk (két sor, hogy ne nyúljon a játéktérbe) ----
+  // 1. sor: klasszikus erőforrások (érme · bomba · TNT); 2. sor: fogyó-zsebek (fiola · sorslap).
   const ry = hy + 30;
+  const ry2 = ry + 24;
   drawCounter(ctx, drawCoinIcon, LX + 7, ry, 7, p.coins, COL.gold, anim.coin);
   drawCounter(ctx, (c, ix, iy, ir) => drawBombIcon(c, ix, iy, ir, 'bomb'), LX + 78, ry, 7, p.bombs, COL.text, anim.bomb);
   drawCounter(ctx, (c, ix, iy, ir) => drawBombIcon(c, ix, iy, ir, 'tnt'), LX + 128, ry, 7, p.tnt, '#ff9a7a', anim.tnt);
+  // fiola (#44): a következő (legrégebbi) fiola színében; üres tartó, ha nincs nálad
+  const nextFiola = p.fiolas[0];
+  const fiolaCol = nextFiola != null ? (FIOLA_COLORS[nextFiola] ?? FIOLA_COLORS[0]!) : '#8a93a8';
+  drawCounter(ctx, (c, ix, iy, ir) => drawFiola(c, ix, iy, ir, fiolaCol, { empty: nextFiola == null }), LX + 7, ry2, 7, p.fiolas.length, '#bcd0e8', anim.fiola);
+  // sorslap (#46/#47): a következő (legrégebbi) lap a saját vizuáljával; üres tartó, ha nincs nálad
+  const nextCard = p.cards[0];
+  const cardDef = nextCard != null ? CARD_BY_ID[nextCard] : CARD_BY_ID['nova'];
+  drawCounter(ctx, (c, ix, iy, ir) => drawCard(c, ix, iy, ir, cardDef, { empty: nextCard == null }), LX + 78, ry2, 7, p.cards.length, cardDef.col, anim.card);
 
   drawStats(ctx, p);
-  drawCollected(ctx, p, h);
+  const setsBottom = drawSets(ctx, p);
+  drawCollected(ctx, p, h, setsBottom);
   drawSkill(ctx, p, h, t);
 
   ctx.restore();
@@ -373,7 +395,7 @@ function drawStats(ctx: CanvasRenderingContext2D, p: Player): void {
   const valX = LX + COLW;
   const rh = 18;
   ctx.textBaseline = 'middle';
-  let y = 102 + rh / 2;
+  let y = 110 + rh / 2;
   for (const [label, val, col] of rows) {
     ctx.textAlign = 'left';
     ctx.font = `400 13px ${SERIF}`;
@@ -389,12 +411,65 @@ function drawStats(ctx: CanvasRenderingContext2D, p: Player): void {
   ctx.textBaseline = 'alphabetic';
 }
 
-/** Felvett tabletták a statok alatt — ikon + név + leírás, garantált réssel. */
-function drawCollected(ctx: CanvasRenderingContext2D, p: Player, h: number): void {
+/**
+ * Szett-bónuszok („Rendek") a statok alatt - kompakt sorok: szín-pont + név +
+ * `darab/küszöb` (vagy `darab ✓`, ha maxon). Csak a megkezdett szettek látszanak
+ * (amiből van legalább 1 tárgy). Visszaadja az alsó Y-t, ahonnan a tabletta-lista
+ * indulhat (üres esetben a régi 236, hogy a tabletták a megszokott ~250-en kezdődjenek).
+ */
+function drawSets(ctx: CanvasRenderingContext2D, p: Player): number {
+  const list = setProgress(p.collected);
+  if (list.length === 0) return 236;
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  let y = 244;
+  ctx.font = `600 11px ${SERIF}`;
+  ctx.fillStyle = COL.muted;
+  ctx.fillText(tr('hud.sets'), LX, y);
+  y += 17;
+
+  const rowH = 17;
+  for (const sp of list) {
+    const active = sp.active != null;
+    const col = sp.set.color;
+    // szín-pont (aktívnál ragyogó udvarral)
+    const dotX = LX + 4;
+    const dotY = y - 4;
+    if (active) {
+      ctx.globalAlpha = 0.3;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 6, 0, TAU);
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 3.5, 0, TAU);
+    ctx.fillStyle = active ? col : COL.muted;
+    ctx.fill();
+    // név
+    ctx.textAlign = 'left';
+    ctx.font = `${active ? 600 : 400} 12px ${SERIF}`;
+    ctx.fillStyle = active ? COL.text : COL.bronze;
+    ctx.fillText(tr(sp.set.nameKey), LX + 15, y);
+    // darab / küszöb (maxon: „N ✓")
+    ctx.textAlign = 'right';
+    ctx.font = `600 11px ${SANS}`;
+    ctx.fillStyle = active ? col : COL.muted;
+    ctx.fillText(sp.nextNeed == null ? `${sp.count} ✓` : `${sp.count}/${sp.nextNeed}`, LX + COLW, y);
+    y += rowH;
+  }
+  ctx.textAlign = 'left';
+  return y + 4;
+}
+
+/** Felvett tabletták a statok/szettek alatt — ikon + név + leírás, garantált réssel. */
+function drawCollected(ctx: CanvasRenderingContext2D, p: Player, h: number, top: number): void {
   const items = p.collected;
   if (items.length === 0) return;
 
-  const headTop = 250;
+  const headTop = Math.max(250, top);
   const rowW = COLW;
   const rowH = 19;
   const listTop = headTop + 14;
@@ -418,7 +493,7 @@ function drawCollected(ctx: CanvasRenderingContext2D, p: Player, h: number): voi
 
   let y = listTop + 4;
   for (const it of shown) {
-    drawPill(ctx, LX + 6, y - 4, 6, pillLook(it));
+    drawItemIcon(ctx, LX + 6, y - 4, 6, it);
     ctx.textAlign = 'left';
     ctx.font = `600 12px ${SERIF}`;
     ctx.fillStyle = COL.text;
@@ -569,8 +644,12 @@ function drawTimers(ctx: CanvasRenderingContext2D, world: World, w: number): voi
       const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 110);
       col = `rgba(255,${Math.round(70 + 40 * pulse)},${Math.round(60 + 30 * pulse)},1)`;
     }
+    // teljes futás-idő a visszaszámláló fölött (jobb felül)
+    drawTimerLine(ctx, cx, MAP_TOP - 44, tr('hud.timer.total'), formatTime(rs.run), COL.muted);
     drawTimerLine(ctx, cx, MAP_TOP - 26, tr('hud.timer.labyrinth'), formatTime(left, urgent), col);
   } else {
+    // teljes futás-idő (jobb felül, az óra-stack tetején) + a szoba/pálya óra
+    drawTimerLine(ctx, cx, MAP_TOP - 48, tr('hud.timer.total'), formatTime(rs.run), COL.muted);
     drawTimerLine(ctx, cx, MAP_TOP - 30, tr('hud.timer.room'), formatTime(rs.room, true), COL.cream);
     drawTimerLine(ctx, cx, MAP_TOP - 12, tr('hud.timer.map'), formatTime(rs.floor), COL.gold);
   }
@@ -632,6 +711,8 @@ function drawMinimap(ctx: CanvasRenderingContext2D, world: World, w: number, t: 
 
   for (const r of dungeon.all()) {
     const isCurrent = r.key === dungeon.currentKey;
+    // a fel nem tárt titkos szoba (#37) NEM látszik a minimapon (bombázásig rejtett)
+    if (r.type === 'secret' && !r.discovered) continue;
     if (!r.visited && !isCurrent) {
       const adj =
         dungeon.get(r.gx - 1, r.gy)?.visited ||
@@ -650,6 +731,9 @@ function drawMinimap(ctx: CanvasRenderingContext2D, world: World, w: number, t: 
     let col = r.visited ? 'rgba(190,170,140,0.6)' : 'rgba(170,150,120,0.22)';
     if (r.type === 'boss') col = r.visited ? 'rgba(255,91,106,0.78)' : 'rgba(255,91,106,0.3)';
     if (r.type === 'item') col = r.visited ? 'rgba(127,196,255,0.78)' : 'rgba(127,196,255,0.3)';
+    if (r.type === 'blood') col = r.visited ? 'rgba(200,30,46,0.8)' : 'rgba(200,30,46,0.32)';
+    if (r.type === 'curse') col = r.visited ? 'rgba(155,95,224,0.82)' : 'rgba(155,95,224,0.32)';
+    if (r.type === 'secret') col = r.visited ? 'rgba(240,210,130,0.84)' : 'rgba(240,210,130,0.36)';
 
     // boss „fenyeget": halk vörös lüktetés
     if (r.type === 'boss' && !isCurrent) {
@@ -676,12 +760,13 @@ function drawMinimap(ctx: CanvasRenderingContext2D, world: World, w: number, t: 
       ctx.stroke();
     }
 
-    if (r.type === 'boss' || r.type === 'item') {
+    if (r.type === 'boss' || r.type === 'item' || r.type === 'blood' || r.type === 'curse' || r.type === 'secret') {
       ctx.fillStyle = r.visited || isCurrent ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.4)';
       ctx.font = `600 12px ${SANS}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(r.type === 'boss' ? '☠' : '★', px + cell / 2, py + cell / 2 + 0.5);
+      const glyph = r.type === 'boss' ? '☠' : r.type === 'blood' ? '♥' : r.type === 'curse' ? '🜏' : r.type === 'secret' ? '?' : '★';
+      ctx.fillText(glyph, px + cell / 2, py + cell / 2 + 0.5);
       ctx.textBaseline = 'alphabetic';
       ctx.textAlign = 'left';
     }

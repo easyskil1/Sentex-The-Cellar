@@ -190,6 +190,8 @@ export const BIND_META: readonly BindMeta[] = [
   { action: 'skill', label: 'Active skill', group: 'action' },
   { action: 'bomb', label: 'Drop bomb', group: 'action' },
   { action: 'tnt', label: 'Throw TNT', group: 'action' },
+  { action: 'fiola', label: 'Drink vial', group: 'action' },
+  { action: 'card', label: 'Play card', group: 'action' },
   { action: 'pause', label: 'Pause', group: 'action' },
 ];
 

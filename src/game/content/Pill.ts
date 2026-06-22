@@ -1,4 +1,5 @@
 import { TAU, shade } from '../../engine/math';
+import { softGlow } from '../render/glow';
 
 /** Tabletta-sziluett: a tárgyak ilyen alakú „gyógyszerként" jelennek meg. */
 export type PillShape = 'round' | 'oval' | 'capsule' | 'diamond' | 'hexagon' | 'triangle';
@@ -42,10 +43,7 @@ export function drawPill(
   ctx.translate(cx, cy);
   if (rot) ctx.rotate(rot);
 
-  if (glow) {
-    ctx.shadowColor = col;
-    ctx.shadowBlur = 18;
-  }
+  if (glow) softGlow(ctx, 0, 0, r * 1.7, col); // cache-elt fénykoszorú a shadowBlur helyett
 
   // alaptest — függőleges gradiens a domború, 3D hatásért
   buildShape(ctx, r, look.shape);
@@ -55,7 +53,6 @@ export function drawPill(
   g.addColorStop(1, shade(col, -0.24));
   ctx.fillStyle = g;
   ctx.fill();
-  ctx.shadowBlur = 0;
 
   // minta + csillanás a sziluetten belülre vágva
   ctx.save();
@@ -98,8 +95,9 @@ export function drawPill(
   ctx.restore();
 }
 
-/** A tabletta sziluett-path-ja az origó köré (kitöltéshez és vágáshoz egyaránt). */
-function buildShape(ctx: CanvasRenderingContext2D, r: number, shape: PillShape): void {
+/** A tabletta sziluett-path-ja az origó köré (kitöltéshez és vágáshoz egyaránt).
+ *  Exportált: a relikvia-ikon (`itemIcon.ts`) ugyanezt használja az ékkő alakjához. */
+export function buildShape(ctx: CanvasRenderingContext2D, r: number, shape: PillShape): void {
   ctx.beginPath();
   switch (shape) {
     case 'round':

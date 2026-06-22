@@ -1,6 +1,7 @@
 import { Room } from './Room';
-import { randi, pick } from '../../engine/math';
-import { DUNGEON } from '../config';
+import { randi, pick, random, withRng } from '../../engine/math';
+import { mulberry32 } from '../rng';
+import { DUNGEON, BLOOD, CURSE, SECRET } from '../config';
 import { DIR_DELTA, type Dir } from '../types';
 
 const key = (x: number, y: number): string => `${x},${y}`;
@@ -14,8 +15,14 @@ export class Dungeon {
   private rooms = new Map<string, Room>();
   currentKey = '0,0';
 
-  constructor(public readonly level: number) {
-    this.generate(level);
+  /**
+   * `seed` megadva (seed-rendszer, #49): a layout-generálás DETERMINISZTIKUS
+   * (ugyanaz a seed = ugyanaz a szobatérkép). Megadás nélkül élő `Math.random`
+   * (pl. a HUB háttér-konténerei, ahol a layout nem számít).
+   */
+  constructor(public readonly level: number, seed?: number) {
+    if (seed !== undefined) withRng(mulberry32(seed), () => this.generate(level));
+    else this.generate(level);
   }
 
   private generate(level: number): void {
@@ -47,7 +54,7 @@ export class Dungeon {
       const arr = [...cands.values()];
       const minNb = Math.min(...arr.map((c) => c.nb));
       // a legkevésbé tömör jelöltek közül választunk (néha megengedünk eggyel többet)
-      const pool = arr.filter((c) => c.nb <= minNb + (Math.random() < 0.3 ? 1 : 0));
+      const pool = arr.filter((c) => c.nb <= minNb + (random() < 0.3 ? 1 : 0));
       const chosen = pick(pool);
       this.rooms.set(key(chosen.x, chosen.y), new Room(chosen.x, chosen.y, 'normal'));
     }
@@ -70,11 +77,57 @@ export class Dungeon {
       for (const [ax, ay] of dirs) if (this.rooms.has(key(r.gx + ax, r.gy + ay))) nb++;
       if (nb === 1) deadEnds.push(k);
     }
+    let itemKey: string | null = null;
     if (deadEnds.length) {
-      this.rooms.get(pick(deadEnds))!.type = 'item';
+      itemKey = pick(deadEnds);
+      this.rooms.get(itemKey)!.type = 'item';
     } else {
       const norms = [...this.rooms.values()].filter((r) => r.type === 'normal');
       if (norms.length) pick(norms).type = 'item';
+    }
+
+    // vér-oltár szoba (#35): egy MÁSIK szabad zsákutcára, esélyfüggően. Külön
+    // szobatípus; kockázat/jutalom (élet→tárgy). Csak ha maradt zsákutca a
+    // tárgyszobán túl, hogy a normál harci szobákat ne fogyasszuk el.
+    const bloodPool = deadEnds.filter((k) => k !== itemKey);
+    let bloodKey: string | null = null;
+    if (bloodPool.length && random() < BLOOD.chance) {
+      bloodKey = pick(bloodPool);
+      this.rooms.get(bloodKey)!.type = 'blood';
+    }
+
+    // átokverem szoba (#38): MÉG egy szabad zsákutcára (a tárgy ÉS a vér után),
+    // esélyfüggően. Külön szobatípus; kockázat/jutalom: fix 1 szív EGYSZER → egy
+    // ingyen ritka tárgy. Csak ha maradt zsákutca, hogy ne fogyasszuk el a harci
+    // szobákat - így nagy térképen ritka, hogy mindhárom különleges szoba meglegyen.
+    const cursePool = deadEnds.filter((k) => k !== itemKey && k !== bloodKey);
+    if (cursePool.length && random() < CURSE.chance) {
+      this.rooms.get(pick(cursePool))!.type = 'curse';
+    }
+
+    // titkos szoba (#37): egy ÜRES (rácson nem létező) cellára, ami legalább egy
+    // meglévő szobával szomszédos - preferáljuk a TÖBB szomszéddal bírót („beékelt"
+    // érzet). REJTETT (discovered=false): nincs nyitott ajtó és a minimapon sem
+    // látszik, amíg egy szomszédos szobából a megfelelő falat fel nem robbantod.
+    if (random() < SECRET.chance) {
+      const empty = new Map<string, { x: number; y: number; nb: number }>();
+      for (const r of this.rooms.values()) {
+        for (const [dx, dy] of dirs) {
+          const nx = r.gx + dx;
+          const ny = r.gy + dy;
+          const k = key(nx, ny);
+          if (this.rooms.has(k) || empty.has(k)) continue;
+          let nb = 0;
+          for (const [ax, ay] of dirs) if (this.rooms.has(key(nx + ax, ny + ay))) nb++;
+          empty.set(k, { x: nx, y: ny, nb });
+        }
+      }
+      if (empty.size) {
+        const arr = [...empty.values()];
+        const maxNb = Math.max(...arr.map((c) => c.nb));
+        const chosen = pick(arr.filter((c) => c.nb === maxNb));
+        this.rooms.set(key(chosen.x, chosen.y), new Room(chosen.x, chosen.y, 'secret'));
+      }
     }
 
     this.currentKey = '0,0';
@@ -92,11 +145,33 @@ export class Dungeon {
     return this.rooms.get(key(gx, gy));
   }
 
-  /** Van-e szomszéd a megadott irányban az aktuális szobához képest? */
+  /**
+   * Van-e (ELÉRHETŐ) szomszéd a megadott irányban az aktuális szobához képest?
+   * A FEL NEM TÁRT titkos szoba nem számít szomszédnak (nincs ajtó, tömör fal),
+   * amíg fel nem robbantod - lásd revealSecret.
+   */
   hasNeighbor(dir: Dir): boolean {
     const c = this.current;
     const d = DIR_DELTA[dir];
-    return this.has(c.gx + d.dx, c.gy + d.dy);
+    const n = this.get(c.gx + d.dx, c.gy + d.dy);
+    if (!n) return false;
+    if (n.type === 'secret' && !n.discovered) return false;
+    return true;
+  }
+
+  /**
+   * Titkos szoba feltárása az aktuális szobából a megadott irányban (bombázáskor).
+   * Igazat ad vissza, ha tényleg volt fel-nem-tárt titkos szomszéd (és most feltárta).
+   */
+  revealSecret(dir: Dir): boolean {
+    const c = this.current;
+    const d = DIR_DELTA[dir];
+    const n = this.get(c.gx + d.dx, c.gy + d.dy);
+    if (n && n.type === 'secret' && !n.discovered) {
+      n.discovered = true;
+      return true;
+    }
+    return false;
   }
 
   /** Belépés a szomszédos szobába; visszaadja az új aktuális szobát. */

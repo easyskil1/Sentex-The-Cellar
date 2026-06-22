@@ -53,6 +53,99 @@ export const PLAYER_BASE = {
   sight: 1,
 };
 
+// ── Fiola (#44, random-hatású fogyóeszköz) ──────────────────────────────────
+// A „Fiola" azonosítatlan, futáson belüli szín→hatás társítással (lásd Fiola.ts /
+// Player.fiolaMap). A hatások a MEGLÉVŐ státuszokra épülnek; az alábbi számok a
+// tranziens buffok hangolása. A bad-trip (burn) tét: KILLHET, ezért fix (raw) DoT.
+export const FIOLA = {
+  /** Drop-esély: a `dropPickup` ELŐTT független rétegként (a nettó-súlyokat nem hígítja). */
+  dropChance: 0.14,
+  /** Gyógyír: azonnali HP-vissza (pont). */
+  heal: HP.heart * 2,
+  /** Fürgeség (haste): időtartam mp + sebesség-/tűz-szorzók. */
+  hasteTime: 8,
+  hasteSpeed: 1.4,   // mozgás-sebesség ×
+  hasteFire: 0.62,   // fireCd × (kisebb = gyorsabb tűz)
+  /** Dühroham (rage): időtartam mp + sebzés-szorzó (a bónusz lejáratkor visszavonva). */
+  rageTime: 8,
+  rageDmgMul: 1.5,
+  /** Káprázat (confuse): fordított irányítás mp. */
+  confuseTime: 5,
+  /** Rossz adag (burn): önsorsoló DoT - tick-köz + összes tick + tickenként pont. */
+  burnTick: 1.0,
+  burnTicks: 3,
+  burnDmg: HP.half,  // tickenként fél szív (3 tick = 1,5 szív, killhet - ez a tét)
+  /** Ólomláb (slow): időtartam mp + sebesség-szorzó. */
+  slowTime: 6,
+  slowMul: 0.5,
+};
+
+// ── Sorslap (#46/#47, kártya/rúna fogyó) ────────────────────────────────────
+// A „Sorslap" a Fiola MELLETT egy MÁSODIK egyszer-használatos zseb (G-gomb). A
+// hatások a meglévő SKILL-könyvtárból merítve (kártyák), + 2 erős rúna (szoba-
+// törlő + sérthetetlenség). Tisztán tranziens/egyszeri hatások: a difficulty
+// playerPower-t NEM mozgatják (nem „láthatatlan ingyen erő"). Lásd `World.useCard`.
+export const CARD = {
+  /** Drop-esély: a fiola UTÁN, külön FÜGGETLEN rétegként (a nettó-súlyokat nem hígítja). */
+  dropChance: 0.09,
+  /** Pusztítás rúnája (szoba-törlő): a NEM-boss ellenfeleket azonnal megöli; a bossnak
+   *  ennyi fix sebzést visz be (anti-OP: a fix-statú bosst nem trivializálja). */
+  purgeBossDmg: 4000,
+  /** Pajzs rúnája: sérthetetlenség mp (a shield-skill 5s rokona, kissé hosszabb). */
+  wardTime: 6,
+};
+
+// ── Vér-oltár szoba (#35, kockázat/jutalom terem) ───────────────────────────
+// Külön szobatípus (`blood`): a játékos NEM érméért, hanem ÉLETPONTÉRT (vérért)
+// vásárol tárgyat. FIX szív-ár / tárgy (a felhasználó döntése: nem skálázódó,
+// nem max-HP-konténer - csak az AKTUÁLIS HP-ból von le). A tét: gyengébb maradsz,
+// de azonnal erősebb buildet kapsz. Anti-OP: a felvett tárgy emeli a játékos-erőt,
+// amit a `difficulty` modell már beépít (az ellenfelek skálázódnak vele); és nem
+// vásárolhatsz, ha a vér megölne (legalább 1 fél szív marad). Lásd `BloodAltar`.
+export const BLOOD = {
+  /** Egy tárgy ára pontban (fix). HP.heart = 1 teljes szív (1000). */
+  cost: HP.heart,
+  /** Hány tárgy-állvány legyen a vér-oltárban. */
+  stands: 2,
+  /** Megjelenési esély szintenként (ha van szabad zsákutca a térképen). */
+  chance: 0.6,
+};
+
+// ── Átokverem (#38, kockázat/jutalom szoba) ─────────────────────────────────
+// A vér-oltár párja: itt EGYSZER fizetsz (fix 1 szív, az AKTUÁLIS HP-ból) a
+// tüskés átok-reliquáriumnál, cserébe EGY INGYEN, RITKA tárgyat kapsz. A vér-
+// oltár pay-per-item piacával szemben ez EGY döntés / EGY erős jutalom. A „ritka"
+// jelleget a `rollBest` adja: ennyi nem-skill sorsolásból a legmagasabb erő-pontút
+// választjuk (nincs új tartalom, csak kedvezőbb eloszlás). Anti-OP: a felvett
+// tárgy emeli a játékos-erőt, amit a `difficulty` modell beépít; halál-guard
+// védi, hogy a fizetség sose öljön be (lásd World.acceptOffer/buyCurse).
+export const CURSE = {
+  /** A belépés/áldozat ára pontban (fix, egyszeri). HP.heart = 1 teljes szív. */
+  cost: HP.heart,
+  /** Hány nem-skill jelöltből választjuk a legerősebbet (ritka jutalom). */
+  rollBest: 3,
+  /** Megjelenési esély szintenként (ha van SZABAD zsákutca a tárgy/vér után). */
+  chance: 0.45,
+};
+
+// ── Titkos szoba (#37, bombázással feltárható) ──────────────────────────────
+// Egy REJTETT graph-szoba egy üres, létező szobával szomszédos cellán. Nincs hozzá
+// nyitott ajtó és a minimapon sem látszik, amíg fel nem tárod: bombát/TNT-t kell a
+// megfelelő fal mellett robbantani (a meglévő `explode` ágon). A jutalom forrás-cache
+// (érme + 1 garantált fogyó + ritkán tárgy) - megkülönbözteti a garantált-tárgyas
+// szobáktól (item/vér/curse), és részben visszatéríti a bomba-költséget. Anti-OP:
+// főleg forrás; a ritka tárgy a `collectItem` egységes útján → difficulty beépíti.
+export const SECRET = {
+  /** Megjelenési esély szintenként (ha van alkalmas üres, szomszédos cella). */
+  chance: 0.55,
+  /** Robbanás-távolság a faltól, ami feltárja a rejtett szomszédot (px). */
+  revealDist: ROOM.TILE * 1.3,
+  /** Szórt érmék száma a feltárt szobában. */
+  coins: 6,
+  /** Esély, hogy a forrás-cache mellett INGYEN tárgy-pedesztál is van. */
+  itemChance: 0.4,
+};
+
 // ── Kénkő-sugár (#1, tartós sugár-lőmód) ────────────────────────────────────
 // A „Kénkő-sugár" relikvia a sima könny-lövést egy FOLYAMATOS, raycast-alapú
 // sugárra cseréli. Tick-sebzés a vonalon álló MINDEN ellenfélre (átütő jelleg),
@@ -174,6 +267,86 @@ export const LAB_TIMER = {
   BONUS: 12,
   /** Alsó korlát: rövid labirintusnál is legyen értelmes a keret. */
   MIN: 25,
+};
+
+// ── Boss-roham mód (#52 / Fázis D, HUB boss-portál) ─────────────────────────
+// A HUB „boss" portálja mögötti, FELOLDHATÓ kihívás-mód: a 10 meglévő boss
+// (BOSS_ORDER) egymás után, FRISS karakterrel. A bossok fix-statúak (nem
+// skálázódnak), a kihívás a sorrendből (egyre nehezebb bossok) + az endurance-ből
+// jön; cserébe a játékos bossonként gyógyul + egy tárgyat kap (build-up gauntlet).
+// Feloldás: a kampányban elért legmélyebb szint (`bestFloor`) >= unlockFloor -
+// így a mód a mélyebbre jutás jutalma. A `floor` rögzített referencia (a bossok
+// raw-sebzése amúgy sem skálázódik vele; csak a megidézett adds + a pont-jutalom
+// érzi). A pont a finishRun-on át a rangba/ranglistába folyik (countBestFloor=false,
+// hogy a boss-roham ne hígítsa a kampány „legmélyebb szint" rekordot).
+export const BOSS_RUSH = {
+  /** Feloldási küszöb: a kampányban elért legmélyebb szint (10 szintes a kampány). */
+  unlockFloor: 5,
+  /** Rögzített referencia-szint (megidézett adds nehézsége + boss pont-jutalom). */
+  floor: 8,
+  /** Bossok közti gyógyulás teljes szívben. */
+  healBetween: 2,
+  /** Extra pont-bónusz bossonként (a legyőzöttek számával skálázva: stageBonus×n). */
+  stageBonus: 750,
+};
+
+// ── Dungeon mód (#52 / Fázis D, HUB dungeon-portál) ─────────────────────────
+// A HUB „dungeon" portálja mögötti, FELOLDHATÓ kihívás-mód: 15 arénaszoba egymás
+// után (mint a boss-roham, de RENDES ellenfelekkel), FRISS karakterrel, egyre
+// több + erősebb ellenfél. Mini-boss az 5./10. szobában, FINÁLÉ-boss a 15.-ben.
+// A meglévő fejezet-sablonokat + ellenfél-palettát + bossokat hasznosítja újra
+// (zéró új tartalom). Mérföldkövenként (boss-szobák) gyógyulás + tárgy-jutalom;
+// a köztes szobák a csapóajtó-UX-en MAGUKTÓL léptetnek (nincs kártya, ne legyen
+// vontatott). Feloldás: bestFloor >= unlockFloor (korábban, mint a boss-roham).
+export const DUNGEON_RUN = {
+  /** Hány arénaszoba egy futás. */
+  rooms: 15,
+  /** Feloldási küszöb: a kampányban elért legmélyebb szint. */
+  unlockFloor: 3,
+  /** Kezdő referencia-szint (sebzés + ellenfél-erő); szobánként nő. */
+  floorBase: 1,
+  /** Szobánkénti referencia-szint növekmény (nehézség-eszkaláció). */
+  floorPerRoom: 1.2,
+  /** Az 1. szoba ellenfél-száma. */
+  enemyBase: 2,
+  /** Szobánkénti ellenfél-szám növekmény (lineáris, plafonnal). */
+  enemyPerRoom: 0.5,
+  /** Egyszerre max ennyi ellenfél egy szobában (perf + balansz plafon). */
+  enemyMax: 9,
+  /** Ezekben a szobákban (1-alapú) mini-boss / finálé van. */
+  bossRooms: [5, 10, 15],
+  /** Gyógyulás a boss-szobák után, teljes szívben. */
+  healAmount: 2,
+  /** Extra pont-bónusz szobánként (a sorszámmal skálázva). */
+  stageBonus: 150,
+};
+
+// ── Labirintus-gauntlet (#52 / Fázis D, HUB labirintus-portál) ──────────────
+// A HUB labirintus-portálja 15 maze-PÁLYÁS, egyre nagyobb + erősebb gauntlet
+// (a régi EGY maze helyett). A pályánkénti ellenfél-szám = (pálya - 1): az 1.
+// pálya tiszta navigációs verseny (0 ellenfél), a 2. egy ellenfél, és így tovább
+// a 15. pályáig (14 ellenfél). A pálya-méret + ellenfél-erő is nő pályánként.
+// (A kampány-kapun át indított labirintus VÁLTOZATLAN: EGY maze, megtartott build.)
+export const LAB_GAUNTLET = {
+  /** Hány pálya egy futás. */
+  stages: 15,
+  /** Az 1. pálya maze-cellái (vízszintes/függőleges); pályánként nő. */
+  baseCols: 8,
+  baseRows: 5,
+  /** Pályánkénti méret-növekmény (cellában). */
+  growCols: 0.6,
+  growRows: 0.4,
+  /** Maximális maze-méret (cellában) - a perf/olvashatóság plafonja. */
+  maxCols: 18,
+  maxRows: 12,
+  /** Rövidítő-hurok esélye (0 = egyetlen megoldás). */
+  loop: 0.12,
+  /** Kezdő referencia-szint; pályánként nő. */
+  floorBase: 1,
+  /** Pályánkénti referencia-szint növekmény (ellenfél-erő). */
+  floorPerStage: 1.3,
+  /** Extra pont-bónusz pályánként (a sorszámmal skálázva). */
+  stageBonus: 200,
 };
 
 export const STORAGE_KEY = 'sentex_pince_best';

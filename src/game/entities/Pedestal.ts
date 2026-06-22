@@ -1,7 +1,6 @@
 import { TAU } from '../../engine/math';
 import type { Item } from '../content/items';
-import { pillLook } from '../content/items';
-import { drawPill } from '../content/Pill';
+import { drawItemIcon } from '../content/itemIcon';
 
 /** Tárgypedesztál a tárgyszobában: rálépve a játékos megkapja a tárgyat. */
 export class Pedestal {
@@ -41,7 +40,7 @@ export class Pedestal {
     // lebegő tabletta
     const it = this.item;
     const yo = -18 + Math.sin(this.bob) * 4;
-    drawPill(ctx, 0, yo, 12, pillLook(it), { glow: true, rot: Math.sin(this.bob) * 0.16 });
+    drawItemIcon(ctx, 0, yo, 12, it, { glow: true, rot: Math.sin(this.bob) * 0.16 });
 
     // fénysugár
     ctx.globalAlpha = 0.18;

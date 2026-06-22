@@ -80,6 +80,16 @@ function init() {
   let eyeX = 0, eyeY = 1;
   drawMenuCharacter(eyeX, eyeY);
   addEventListener('resize', () => drawMenuCharacter(eyeX, eyeY));
+  // Az egérkövetés újrarajzolását KÉPKOCKÁNKÉNT EGYRE fékezzük (rAF-coalescing):
+  // a `mousemove` akár 125×/mp tüzel, és minden rajzolás újra-raszterizálja a
+  // `.menu-char` CSS-szűrt (brightness/saturate) rétegét is - fékezés nélkül ez a
+  // fő szálon versenyzett a játék-ciklussal és leverte a menü FPS-ét. Most egy
+  // frame alatt sok mozgás-esemény EGYETLEN rajzolássá olvad össze.
+  let charDirty = false;
+  const flushMenuChar = (): void => {
+    charDirty = false;
+    drawMenuCharacter(eyeX, eyeY);
+  };
   addEventListener('mousemove', (e) => {
     const menu = document.getElementById('menu');
     if (!menu || menu.classList.contains('hidden')) return;
@@ -91,7 +101,7 @@ function init() {
     const cy = rect.top + rect.height * 0.4;
     eyeX = Math.max(-1, Math.min(1, (e.clientX - cx) / 200));
     eyeY = Math.max(-1, Math.min(1, (e.clientY - cy) / 200));
-    drawMenuCharacter(eyeX, eyeY);
+    if (!charDirty) { charDirty = true; requestAnimationFrame(flushMenuChar); }
   });
 
   // mentett render-beállítás: automatikus minőség, vagy fix felbontás-szorzó

@@ -1,6 +1,6 @@
 {
   "name": "sentex-the-cellar",
-  "version": "0.8.6",
+  "version": "0.8.17",
   "description": "Sentex: The Cellar - top-down roguelike (Canvas + TypeScript)",
   "type": "module",
   "scripts": {

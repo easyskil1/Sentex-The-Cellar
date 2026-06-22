@@ -115,6 +115,21 @@
     </div>
   </div>
 
+  <!-- Seed-kapu modal (#49): a HUB seed-állomása nyitja -->
+  <div id="seedModal" class="overlay hidden">
+    <div class="offer-card">
+      <div class="offer-badge" data-i18n="seed.badge">🎲 SEED</div>
+      <div class="offer-title" data-i18n="seed.title">Set a seed</div>
+      <div class="offer-desc" data-i18n="seed.desc">Same seed = same Cellar. Leave empty for a random run.</div>
+      <input id="seedInput" class="name-input" maxlength="16" placeholder="seed code" data-i18n-ph="seed.placeholder" autocomplete="off" />
+      <div class="name-rule" data-i18n="seed.rule">Letters, numbers and hyphen · max 16</div>
+      <div class="offer-actions">
+        <button class="btn" id="seedSet" data-i18n="seed.set.btn">SET</button>
+        <button class="btn ghost" id="seedRandom" data-i18n="seed.random.btn">RANDOM</button>
+      </div>
+    </div>
+  </div>
+
   <!-- RANG: teljes képernyős, admin-kinézetű lap -->
   <div id="rank" class="overlay sheetpage hidden">
     <div class="admin-bar">
@@ -165,6 +180,9 @@
         <button class="btn small" data-action="admin-skill" id="adminTabSkill">✨ SKILL</button>
         <button class="btn small" data-action="admin-odds" id="adminTabOdds">🎁 ZSÁKMÁNY</button>
         <button class="btn small" data-action="admin-balance" id="adminTabBalance">⚖ BALANSZ</button>
+        <button class="btn small" data-action="admin-vandor" id="adminTabVandor">🧍 VÁNDOR</button>
+        <button class="btn small" data-action="admin-proba" id="adminTabProba">🎯 PRÓBA</button>
+        <button class="btn small" data-action="admin-seed" id="adminTabSeed">🎲 SEED</button>
         <button class="btn small" data-action="admin-settings" id="adminTabSettings">⚙ BEÁLLÍTÁSOK</button>
       </div>
       <button class="btn small" data-action="menu">← VISSZA</button>

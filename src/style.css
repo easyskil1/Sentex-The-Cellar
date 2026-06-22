@@ -94,7 +94,9 @@ body.dev [data-dev-only] { display: inline-block; }
   letter-spacing: 2px;
   font-size: clamp(14px, 2.4vw, 18px);
 }
-.admin-tabs { display: flex; gap: 8px; pointer-events: auto; }
+.admin-tabs { display: flex; flex-wrap: wrap; gap: 8px; pointer-events: auto; }
+/* Vándor/Próba kártya-fejléc szín-pötty (az accent gyors azonosítása). */
+.adm-swatch { display: inline-block; width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, 0.45); flex: none; }
 .admin-tabs .btn.small { background: linear-gradient(180deg, #3a3326, #2a2418); color: #cdb98a; box-shadow: 0 3px 0 #1a160e; }
 .admin-tabs .btn.small.active { background: linear-gradient(180deg, #f0c878, #cf9b46); color: #1a120a; box-shadow: 0 3px 0 #8a5e22; }
 
@@ -531,6 +533,10 @@ kbd.wide { min-width: auto; letter-spacing: 0.5px; }
 .go-medal { display: block; margin: 6px auto 2px; width: 104px; height: 104px; }
 .gameover-best { font-size: clamp(13px, 2.6vw, 17px); margin-bottom: 20px; color: #b08a5a; }
 .newbest { color: #ff7b4d; font-weight: 900; animation: pulse 1s infinite; }
+.go-seed { display: inline-block; margin-top: 6px; padding: 2px 10px; border: 1px solid #5a4a33;
+  border-radius: 6px; color: #d8c39a; font-family: 'Courier New', monospace; font-size: 0.92em;
+  letter-spacing: 0.04em; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.go-seed:hover { background: rgba(216,195,154,0.12); color: #ffe6ad; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 /* ---- Profil-megjelenítés (a RANG lap profil-panelje) ---- */
@@ -818,6 +824,38 @@ kbd.wide { min-width: auto; letter-spacing: 0.5px; }
   line-height: 1.4;
   max-width: 200px;
 }
+
+/* Tárgy-detail: a Rend-kereszthivatkozás sora (a szín inline, a Rend színe) */
+.best-stat.set-ref { font-size: 12px; opacity: 0.95; }
+
+/* RENDEK fül · szett-detail (a .best-detail-stats egyetlen, függőleges gyereke) */
+.set-detail { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.set-sub {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8a7c66;
+  margin-top: 4px;
+}
+.set-members { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 210px; }
+.set-member {
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(176, 138, 90, 0.25);
+}
+.set-member.locked { opacity: 0.5; }
+.set-member-canvas { width: 36px; height: 36px; }
+.set-tiers { display: flex; flex-direction: column; gap: 5px; width: 210px; }
+.set-tier {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 12.5px; color: #d8cdbf;
+}
+.set-tier.locked .set-tier-bonus { color: #6e6354; font-style: italic; }
+.set-tier-need { font-weight: 600; white-space: nowrap; }
+.set-tier-arrow { color: #8a7c66; }
+.set-tier-bonus { letter-spacing: 0.02em; }
 @media (max-width: 640px) {
   .best-layout { flex-direction: column; }
   .best-detail { flex-basis: auto; width: 100%; position: static; }
@@ -826,6 +864,9 @@ kbd.wide { min-width: auto; letter-spacing: 0.5px; }
 /* A RANG-hub almenüi a fejléc admin-tabs sávjában élnek (admin-mintára), így a
    .admin-tabs .btn.small stílust öröklik — itt csak a törésre engedünk teret. */
 #rankTabs { flex-wrap: wrap; }
+/* A Kódex 10 füle (5 eredeti + 5 új tartalom-rendszer) nem fér egy sorba a keskenyebb
+   ablakokban - a RANG-mintára itt is engedünk a törésnek (nem csúszik le a képernyőről). */
+#codexTabs { flex-wrap: wrap; }
 
 /* Stat-csempe-rács (RANG · Rekordok/Statisztika): nagy érték + kis címke */
 .stat-grid {
@@ -853,6 +894,45 @@ kbd.wide { min-width: auto; letter-spacing: 0.5px; }
   text-transform: uppercase;
   letter-spacing: 1px;
   color: #9a8e74;
+}
+
+/* ---- Teljesítmények (RANG · Érdemek fül) ---- */
+.ach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.ach-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(180deg, rgba(28, 20, 14, 0.42), rgba(12, 9, 14, 0.42));
+  border: 1px solid rgba(240, 200, 120, 0.16);
+  border-left-width: 3px;
+  border-radius: 10px;
+  padding: 11px 14px;
+  text-align: left;
+}
+.ach-tile.locked { opacity: 0.5; filter: grayscale(0.6); }
+.ach-bronze { border-left-color: #c08552; }
+.ach-silver { border-left-color: #c9d2dc; }
+.ach-gold { border-left-color: #f0c878; }
+.ach-mark { font-size: 20px; line-height: 1; flex: 0 0 auto; }
+.ach-bronze .ach-mark { color: #c08552; }
+.ach-silver .ach-mark { color: #c9d2dc; }
+.ach-gold .ach-mark { color: #f0c878; }
+.ach-tile.locked .ach-mark { color: #6a6256; }
+.ach-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: #f0e2bd;
+  letter-spacing: 0.3px;
+}
+.ach-desc {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #9a8e74;
+  line-height: 1.3;
 }
 
 /* ---- Mobil vezérlés ---- */

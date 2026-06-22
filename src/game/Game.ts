@@ -2,8 +2,9 @@ import type { Engine, EngineCallbacks } from '../engine/Engine';
 import type { AudioManager } from '../engine/Audio';
 import type { Input } from '../engine/Input';
 import type { Overlays, OverlayAction } from '../ui/Overlays';
+import { t } from '../i18n';
 
-import { World, type OfferView, type HubChoice } from './World';
+import { World, type OfferView, type HubChoice, type HubStationId } from './World';
 import { drawHUD } from './HUD';
 import {
   loadProfile,
@@ -17,10 +18,13 @@ import {
 } from './progression';
 import { loadStats, loadRecords, commitRun, resetAllStats } from './stats';
 import { resetBestiary } from './bestiary';
+import { markChallengeCleared } from './content/challenges';
+import { evaluateAchievements, loadAchievements, ACHIEVEMENTS } from './content/achievements';
 import { loadMusicVolume, saveMusicVolume, loadSfxVolume, saveSfxVolume, loadBinds, saveBinds, loadFpsShown, saveFpsShown, loadRenderScale, saveRenderScale, loadAutoQuality, saveAutoQuality, saveFullscreenPref, loadGameFeel, saveGameFeel, loadHitStop, saveHitStop, loadThickTears, saveThickTears } from './settings';
 import { DEFAULT_BINDS, type InputAction } from '../engine/Input';
 import { generateLabyrinth } from './level/labyrinth';
 import { CHAPTERS, resolveLevel, chapterName } from './level/levels';
+import { BOSS_RUSH, DUNGEON_RUN } from './config';
 import type { AdminController, AdminHost } from './adminHook';
 
 type GameState = 'menu' | 'play' | 'pause' | 'over' | 'admin' | 'offer';
@@ -41,6 +45,8 @@ export class Game implements EngineCallbacks {
   private menuScreen: 'main' | 'rank' | 'bestiary' | 'settings' | 'credits' = 'main';
   /** Megy-e épp a főmenü narrátora (a gomb szándék-állapota, nem a dekódolásé). */
   private narrationOn = false;
+  /** Igaz, ha a kódex/rang nézetet a HUB-ból nyitottuk → a VISSZA a hubra tér (Ú3). */
+  private hubReturn = false;
   /** Dev-only admin-vezérlő; a `main.ts` regisztrálja (production buildben null marad). */
   private admin: AdminController | null = null;
 
@@ -51,8 +57,9 @@ export class Game implements EngineCallbacks {
     private readonly overlays: Overlays,
   ) {
     this.world = new World(engine, audio, input, {
-      onGameOver: () => this.handleGameOver(),
+      onGameOver: () => this.handleGameOver(false),
       onOffer: (offer) => this.showOffer(offer),
+      onWin: () => this.handleGameOver(true),
     });
     this.best = loadProgress().bestFloor;
     this.profile = loadProfile();
@@ -91,6 +98,7 @@ export class Game implements EngineCallbacks {
     this.world.onEnterLabyrinth = () => this.enterLabyrinthFromWorld();
     // Hub-portál: a játékos egy NYITOTT portálra lépett → indítjuk a módot.
     this.world.onHubChoice = (id) => this.handleHubChoice(id);
+    this.world.onHubStation = (id) => this.openHubMeta(id);
 
     // Háttérnek mindig legyen érvényes pálya a menü mögött is.
     this.world.newGame();
@@ -102,7 +110,16 @@ export class Game implements EngineCallbacks {
     this.updateMusic();
     // Hub (mód-választó, a world belsejében fut): ESC = vissza a főmenübe.
     if (this.world.isHub) {
-      if (this.input.consumePause()) { this.showMenu(); return; }
+      // Seed-kapu modal (#49) nyitva: a hub befagyasztva, az ESC-et a modal kezeli.
+      if (this.world.isSeedGate) { this.world.update(dt); return; }
+      // ESC: a szakasz-választóból vissza a hubra, egyébként vissza a főmenübe.
+      if (this.input.consumePause()) {
+        if (this.world.isStageSelect) this.world.closeStageSelect();
+        else if (this.world.isCharacterSelect) this.world.closeCharacterSelect();
+        else if (this.world.isChallengeSelect) this.world.closeChallengeSelect();
+        else this.showMenu();
+        return;
+      }
       this.world.update(dt);
       return;
     }
@@ -204,7 +221,9 @@ export class Game implements EngineCallbacks {
         if (this.state === 'pause') this.togglePause();
         break;
       case 'menu':
-        this.showMenu();
+        // a kódex/rang VISSZA-ja a HUB-ból nyitva a hubra tér (Ú3), nem főmenübe
+        if (this.hubReturn) { this.hubReturn = false; this.enterHub(); }
+        else this.showMenu();
         break;
       case 'admin':
         this.showAdmin();
@@ -294,6 +313,9 @@ export class Game implements EngineCallbacks {
       case 'admin-skill':
       case 'admin-odds':
       case 'admin-balance':
+      case 'admin-vandor':
+      case 'admin-proba':
+      case 'admin-seed':
       case 'admin-settings':
         this.admin?.action(action);
         break;
@@ -373,15 +395,56 @@ export class Game implements EngineCallbacks {
 
   /** Belépés a hub-terembe (a play-állapoton belül fut, mint a labirintus). */
   private enterHub(): void {
-    this.world.startHub();
+    // a zárt portálok (#52) feloldása a haladástól: a boss-roham a mélyebbre jutás
+    // jutalma (a kampányban elért legmélyebb szint >= küszöb). A dungeon-portál
+    // még tartalom nélkül, ezért zárva marad.
+    const prog = loadProgress();
+    this.world.startHub({
+      boss: prog.bestFloor >= BOSS_RUSH.unlockFloor,
+      dungeon: prog.bestFloor >= DUNGEON_RUN.unlockFloor,
+    });
     this.state = 'play';
     this.overlays.hideAll();
   }
 
   /**
-   * Egy hub-portál választása. Csak NYITOTT portálra hívódik (a zárt Dungeon/Boss
-   * „hamarosan" jelzését a World maga adja). A Labirintus a hubból FRISS
-   * karakterrel indul, és a kijáratnál visszatér a hubba.
+   * Egy HUB meta-állomásra lépés (Ú3): a kódex/rang nézet a bázisról nyílik. A
+   * hubot lebontjuk (a menü-háttér áll vissza alá), és megjegyezzük, hogy a
+   * VISSZA a hubra térjen (`hubReturn`), nem a főmenübe.
+   */
+  private openHubMeta(id: HubStationId): void {
+    // Seed-kapu (#49): a hubon MARAD (modal a hub fölött), nem megyünk menübe.
+    if (id === 'seed') { this.openSeedGate(); return; }
+    this.hubReturn = true;
+    this.world.exitHub();
+    this.state = 'menu';
+    if (id === 'bestiary') this.showBestiary();
+    else this.showRank();
+  }
+
+  /**
+   * HUB seed-kapu (#49, saját csavar): modal a hub fölött a KÖVETKEZŐ story-futás
+   * seedjének megadásához. A hub be van fagyasztva, amíg nyitva van; a beállítás
+   * a `pendingSeed`-et írja (üres = friss random), a story-portál ezt használja.
+   */
+  private openSeedGate(): void {
+    this.world.openSeedGate();
+    this.overlays.showSeedGate(
+      this.world.pendingSeedStr,
+      (seed) => {
+        this.world.setPendingSeed(seed);
+        const set = this.world.pendingSeedStr;
+        this.world.addFloater(this.world.cx, this.world.cy - 40,
+          set ? t('seed.set', { seed: set }) : t('seed.cleared'), '#e7d0a0');
+      },
+      () => this.world.closeSeedGate(),
+    );
+  }
+
+  /**
+   * Egy hub-portál választása. Csak NYITOTT portálra hívódik (a zárt portál
+   * feloldás-feltételét a World floaterben jelzi). Minden HUB-mód FRISS karakterrel
+   * indul; a győzelem/halál a game-over képernyőre visz.
    */
   private handleHubChoice(id: HubChoice): void {
     this.audio.resume();
@@ -389,16 +452,13 @@ export class Game implements EngineCallbacks {
       this.world.newGame();
       this.state = 'play';
       this.overlays.hideAll();
-    } else if (id === 'labyrinth') {
-      const ch = CHAPTERS.find((c) => c.labyrinth);
-      if (!ch?.labyrinth) return;
-      this.world.newGame();                       // friss karakter a hub-futáshoz
-      this.world.onLabyrinthExit = () => this.enterHub(); // kijáratnál vissza a hubba
-      this.world.startLabyrinth(generateLabyrinth(ch.labyrinth), ch.theme, ch.enemyKinds, ch.id);
-      this.state = 'play';
-      this.overlays.hideAll();
+    } else {
+      // A három kihívás-mód (labirintus / boss / dungeon) NEM indul azonnal:
+      // előbb a szakasz-választó oldal jön, ahonnan bármelyik szakasz indítható
+      // (a portálba lépve nem kell végigjátszani az előzőeket). A választó a
+      // hub-on belül fut (state marad 'play', az isHub igaz → nincs HUD).
+      this.world.openStageSelect(id);
     }
-    // 'dungeon' / 'boss': zárt — a World már jelezte; itt nincs teendő.
   }
 
   /** Főmenü narrátor-gomb: lejátszás indítása, ill. ha már szól, leállítása. */
@@ -412,6 +472,7 @@ export class Game implements EngineCallbacks {
 
   private showMenu(): void {
     this.admin?.close();
+    this.hubReturn = false;      // főmenübe lépve a hub-vissza szándék elévül
     this.world.exitHub();        // ha a hubból léptünk ki, a háttér visszaáll normál szobára
     this.audio.stopVoice();      // menübe lépve ne szóljon tovább a narráció
     this.narrationOn = false;
@@ -446,6 +507,10 @@ export class Game implements EngineCallbacks {
       const ch = CHAPTERS.find((c) => c.id === id);
       return { label: ch ? chapterName(ch) : id, time: records.labClear[id]! };
     });
+    // teljesítmények: az aktuális állás (a kiértékelés a game-overnél fut); az
+    // Overlays fordítja a nevet/leírást az id-ből (a Game i18n-mentes marad)
+    const unlocked = loadAchievements();
+    const achievements = ACHIEVEMENTS.map((a) => ({ id: a.id, tier: a.tier, unlocked: unlocked.has(a.id) }));
     this.overlays.showRank({
       profile: this.profile,
       rank: rankInfo(progress.totalScore),
@@ -456,6 +521,7 @@ export class Game implements EngineCallbacks {
       records,
       floorRecords,
       labRecords,
+      achievements,
     });
   }
 
@@ -524,33 +590,42 @@ export class Game implements EngineCallbacks {
     }
   }
 
-  private handleGameOver(): void {
+  private handleGameOver(won: boolean): void {
     this.state = 'over';
-    const floor = this.world.floor;
-    const score = this.world.score;
+    // különleges futások (boss-roham / dungeon / labirintus-gauntlet): a „szint" a
+    // sorszám, és NEM számít bele a kampány „legmélyebb szint" rekordba (különben a
+    // HUB-mód hígítaná a feloldás-kaput / önmagát oldaná fel).
+    const special = this.world.isSpecialRun;
+    const floor = special ? this.world.specialStage : this.world.floor;
+    const score = this.world.finalScore; // kihívás-szorzóval (#51); normál futásnál = nyers pont
     const coins = this.world.player.coins;
+    // kihívás-mód (#51) teljesítve, ha győzelemmel ért véget
+    if (won && this.world.activeChallengeId) markChallengeCleared(this.world.activeChallengeId);
     const floorName = this.world.floorName();
-    const isBestFloor = floor > this.best;
+    const isBestFloor = !special && floor > this.best;
 
     // Futás lezárása: pont az összesítetthez, rang újraszámítás, ranglista (idővel),
     // majd az élethosszig statisztika + csúcs-rekordok összesítése.
     const name = this.profile?.name ?? 'Unnamed';
     const rs = this.world.runStats;
     const time = rs.run;
-    const outcome = finishRun(name, score, floor, time);
+    const outcome = finishRun(name, score, floor, time, !special);
     if (!rs.flushed) {
       commitRun({
-        time, score, coins, died: true,
+        time, score, coins, died: !won,
         kills: rs.kills, bossKills: rs.bossKills,
         roomsCleared: rs.roomsCleared, floorsCleared: rs.floorsCleared, labsCleared: rs.labsCleared,
       });
       rs.flushed = true;
     }
     this.best = outcome.progress.bestFloor;
+    // teljesítmények kiértékelése a FRISS statokból (commitRun után); az újak id-jei
+    // a game-overre kerülnek értesítésként (az Overlays fordít), és perzisztálódnak.
+    const freshAch = evaluateAchievements();
 
     setTimeout(() => {
       this.overlays.showGameOver({
-        won: false,
+        won,
         floorName,
         score,
         coins,
@@ -560,6 +635,9 @@ export class Game implements EngineCallbacks {
         totalScore: outcome.progress.totalScore,
         rankedUp: outcome.rankedUp,
         place: outcome.place,
+        newAchievements: freshAch,
+        // seed-kód csak normál kampánynál (a HUB-módok fixek, nem runSeed-vezéreltek)
+        seed: special ? undefined : this.world.runSeedStr,
       });
     }, 700);
   }

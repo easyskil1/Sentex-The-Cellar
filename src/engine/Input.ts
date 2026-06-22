@@ -8,13 +8,13 @@ import type { Vec2 } from './math';
 export type InputAction =
   | 'up' | 'down' | 'left' | 'right'
   | 'shoot-up' | 'shoot-down' | 'shoot-left' | 'shoot-right'
-  | 'pause' | 'skill' | 'bomb' | 'tnt';
+  | 'pause' | 'skill' | 'bomb' | 'tnt' | 'fiola' | 'card';
 
 /** Gyári billentyű-kiosztás (a mentett felülírások erre épülnek rá). */
 export const DEFAULT_BINDS: Record<InputAction, string> = {
   up: 'w', down: 's', left: 'a', right: 'd',
   'shoot-up': 'arrowup', 'shoot-down': 'arrowdown', 'shoot-left': 'arrowleft', 'shoot-right': 'arrowright',
-  pause: 'p', skill: 'e', bomb: 'b', tnt: 't',
+  pause: 'p', skill: 'e', bomb: 'b', tnt: 't', fiola: 'f', card: 'g',
 };
 
 /**
@@ -47,6 +47,8 @@ export class Input {
   private skillRequested = false;
   private tntRequested = false;
   private bombRequested = false;
+  private fiolaRequested = false;
+  private cardRequested = false;
 
   constructor() {
     addEventListener('keydown', (e) => {
@@ -65,6 +67,8 @@ export class Input {
         if (k === this.binds.skill) this.skillRequested = true;   // aktív skill
         if (k === this.binds.tnt) this.tntRequested = true;       // TNT
         if (k === this.binds.bomb) this.bombRequested = true;     // bomba
+        if (k === this.binds.fiola) this.fiolaRequested = true;   // fiola (kiivás)
+        if (k === this.binds.card) this.cardRequested = true;     // sorslap (kijátszás)
       }
     });
     addEventListener('keyup', (e) => {
@@ -128,6 +132,24 @@ export class Input {
   consumeBomb(): boolean {
     if (this.bombRequested) {
       this.bombRequested = false;
+      return true;
+    }
+    return false;
+  }
+
+  /** Igaz egyszer, amikor a fiola gomb (F) lenyomódott. */
+  consumeFiola(): boolean {
+    if (this.fiolaRequested) {
+      this.fiolaRequested = false;
+      return true;
+    }
+    return false;
+  }
+
+  /** Igaz egyszer, amikor a sorslap gomb (G) lenyomódott. */
+  consumeCard(): boolean {
+    if (this.cardRequested) {
+      this.cardRequested = false;
       return true;
     }
     return false;

@@ -14,12 +14,15 @@ import type { Ring } from './entities/Ring';
 import { Enemy } from './entities/enemies/Enemy';
 import { drawEnemy } from './entities/enemies/EnemyRenderer';
 import { drawBullet } from './entities/BulletRenderer';
-import { BOSS_REGISTRY, isBossTarget, type BossTarget } from './entities/enemies/bossRegistry';
+import { BOSS_REGISTRY, BOSS_ORDER, isBossTarget, type BossTarget } from './entities/enemies/bossRegistry';
 import { CHAMPION_TRAITS, ENEMY_STATS, type EnemyKind, type ChampionTrait } from './entities/enemies/enemyTypes';
 import { Pickup, type PickupType } from './entities/Pickup';
 import { Shop, offerView, type ShopStall } from './entities/Shop';
+import { BloodAltar, type BloodStand } from './entities/BloodAltar';
+import { CurseAltar, type CurseStand } from './entities/CurseAltar';
 import { Pedestal } from './entities/Pedestal';
 import { rollItem, itemName, itemDesc, type Item } from './content/items';
+import { ITEM_SETS, setCount, tierAtExactly } from './content/itemSets';
 import { rollGamble, GAMBLE_COST, rerollPrice } from './content/shopPricing';
 import { Dungeon } from './level/Dungeon';
 import { Room } from './level/Room';
@@ -32,14 +35,27 @@ import { LightingSystem } from './systems/LightingSystem';
 import { computeVisibility, type Seg } from './systems/visibility';
 import { buildOccluder, type OccluderShape } from './systems/occluder';
 import { loadShadowMode, saveShadowMode, saveShake, loadHitStop, type ShadowMode } from './settings';
-import { ROOM, GRID, PLAYER_BASE, HP, LAB_TIMER, BEAM, FLAME, CHARGE } from './config';
-import { TAU, rand, clamp, dist2, pick } from '../engine/math';
+import { ROOM, GRID, PLAYER_BASE, HP, LAB_TIMER, BEAM, FLAME, CHARGE, FIOLA, CARD, SECRET, BOSS_RUSH, DUNGEON_RUN, LAB_GAUNTLET } from './config';
+import { FIOLA_EFFECT_BY_ID, FIOLA_COLORS, markFiolaSeen } from './content/Fiola';
+import { CARD_BY_ID, rollCardEffect, markCardSeen, type CardEffect } from './content/Card';
+import { TAU, rand, randi, clamp, dist2, pick, random, withRng } from '../engine/math';
+import { mulberry32, spick, mix, hashStr, randomSeedStr } from './rng';
 import { parseTemplate, type BossKind } from './level/roomTemplates';
 import {
   drawGate as drawGatePortal,
   drawDungeonGate as drawDungeonPortal,
 } from './level/gateRender';
-import { drawHubPortal, drawHubGlyph, drawHubTitle } from './level/hubRender';
+import {
+  drawHubPortal, drawHubGlyph, drawHubTitle,
+  drawHubStation, drawHubNpc, drawHubBrazier, drawHubCharStatue, drawHubChalObelisk,
+} from './level/hubRender';
+import {
+  layoutStageSelect, drawStageSelect, type SelectMode, type SelectLayout,
+} from './level/stageSelectRender';
+import {
+  layoutCharacterSelect, drawCharacterSelect,
+  type CharLayout, type CharCardView, type CharStat,
+} from './level/characterSelectRender';
 import { drawLabWalls, drawLabExit, drawLabFrame, drawLabOverlay } from './level/labyrinthRender';
 import { drawWalls, drawDoors, drawTrapdoor, drawWaterBody, vignetteGradient } from './level/roomRender';
 import { FloorCache } from './level/floorCache';
@@ -48,14 +64,22 @@ import { drawProjectileGlow, drawDamageLabels } from './level/worldOverlays';
 import { MAP_ANIM_BY_CH } from './level/mapAnim';
 import { resolveLevel, CHAPTERS, chapterFloorRange, chapterName, chapterBossName, chapterBossQuote } from './level/levels';
 import { enemyScale, scaleIncomingDamage, enemyDamageMul, NO_SCALE, type EnemyScale } from './balance/difficulty';
-import { unlockEnemy, unlockBoss, unlockPerk, unlockSkill } from './bestiary';
+import { unlockEnemy, unlockBoss, unlockPerk, unlockSkill, unlockSetTier } from './bestiary';
 import { TUNING } from './balance/tuning';
 import { SKILL_BY_ID, skillName, skillDesc } from './content/skills';
 import { Bomb, type BombType } from './entities/Bomb';
 import { dropConfig, roomDropChance, netSum } from './content/dropConfig';
+import {
+  CHARACTERS, CHARACTER_BY_ID, loadCharacterId, saveCharacterId, isCharacterUnlocked, type CharacterDef,
+} from './content/characters';
+import {
+  CHALLENGES, loadClearedChallenges, type ChallengeDef,
+} from './content/challenges';
 import type { Theme } from './level/theme';
-import type { Labyrinth } from './level/labyrinth';
-import { RunStats, recordFloorClear, recordLabClear } from './stats';
+import { generateLabyrinth, type Labyrinth } from './level/labyrinth';
+import {
+  RunStats, recordFloorClear, recordLabClear, recordStageClear, loadStageTimes, stageKey, formatTime,
+} from './stats';
 
 /** Egy felugró ajánlat-ablak tartalma (bolti vásárlás megerősítése / értesítés). */
 export interface OfferView {
@@ -73,6 +97,8 @@ export interface WorldCallbacks {
   onGameOver(): void;
   /** A játékos vásárolni készül a boltban: a Game felugró ablakban kéri a döntést. */
   onOffer(offer: OfferView): void;
+  /** Győzelem (jelenleg: a boss-roham mód utolsó bossát is legyőzte). */
+  onWin(): void;
 }
 
 /** A játékost ért sebzés hang-kategóriája (forrás szerint). */
@@ -85,10 +111,25 @@ export type HurtSound = 'hurt' | 'acid' | 'burn' | 'zap';
  */
 const MAX_SPLATS = 96;
 
+/**
+ * A `mulberry32`/`spick` (determinisztikus PRNG + seedelt választás) közös helyen
+ * él: `game/rng.ts`. A HUB-módok (dungeon / labirintus-gauntlet) pályánként ehhez
+ * seedelnek, hogy a pálya-elrendezés ÉS az ellenfelek (típus + pozíció + champion)
+ * FIXEK legyenek; a kampány a seed-rendszerrel (#49) ugyanígy reprodukálható.
+ * (A futásidejű harc-RNG marad véletlen.)
+ */
+/** Labirintus-gauntlet seed-bázis: az ellenfél-típus-választás determinisztikus eltolása. */
+const LAB_SEED_BASE = 0x1a_00_00;
+
 /** A hub-terem (mód-választó) négy portálja. */
 export type HubChoice = 'story' | 'dungeon' | 'labyrinth' | 'boss';
 /** Egy hub-portál: a célmód, a rács-pozíciója, és hogy zárt-e (még nincs megírva). */
 interface HubPortal { id: HubChoice; col: number; row: number; locked: boolean; }
+/** A HUB meta-állomásai (Ú3): rálépve a Game a megfelelő nézetet/modalt nyitja
+ *  (kódex, rang, vagy a seed-kapu - #49). */
+export type HubStationId = 'bestiary' | 'rank' | 'seed';
+/** Egy meta-állomás a HUB-ban (kódex-pulpitus / rang-obeliszk) a rács-pozíciójával. */
+interface HubStation { id: HubStationId; col: number; row: number; }
 
 /** Admin · Beállítások — különálló csalás-kapcsolók (a régi „God Mode" helyett). */
 export interface Cheats {
@@ -129,6 +170,10 @@ export class World {
   private pendingStall: ShopStall | null = null;
   /** Az ingyenes tárgy-pedesztál, amelynek skill-ajánlata épp döntésre vár. */
   private pendingPedestal: Pedestal | null = null;
+  /** A vér-oltár-állvány, amelynek vér-ajánlata épp döntésre vár (felugró ablak). */
+  private pendingBlood: BloodStand | null = null;
+  /** Az átok-reliquárium ajánlata, amely épp döntésre vár (felugró ablak). */
+  private pendingCurse: CurseStand | null = null;
   /** A sorsoláson nyert skill-tárgy, amelynek felvétele épp döntésre vár. */
   private pendingGambleItem: Item | null = null;
   /** Igaz, ha épp egy puszta értesítő ablak van nyitva (pl. „Nem nyertél"). */
@@ -174,6 +219,17 @@ export class World {
   dungeon!: Dungeon;
   floor = 1;
   score = 0;
+  /**
+   * Seed-rendszer (#49): a FUTÁS seedje. `runSeedStr` a megosztható kód (base36),
+   * `runSeed` az ebből derivált szám. A kampány-generálás (layout, ellenfél, drop,
+   * tárgy) ebből reprodukálható; a harc-RNG marad élő. `pendingSeed` = a HUB
+   * seed-kapun beírt kód a KÖVETKEZŐ story-futáshoz (null = friss random seed).
+   */
+  runSeedStr = '';
+  private runSeed = 1;
+  private pendingSeed: string | null = null;
+  /** Igaz, amíg a HUB seed-kapu modalja nyitva van (a hub-update befagyasztva). */
+  private seedGate = false;
   /** Élő futás-időzítők + számlálók (HUD-óra + a futás végi statisztika forrása). */
   readonly runStats = new RunStats();
   /** Az aktív labirintus fejezet-id-ja (a labirintus-rekord kulcsa). */
@@ -268,6 +324,80 @@ export class World {
   private hubArmed = true;
   /** A Game köti be: a játékos egy NYITOTT hub-portálra lépett → a Game indítja a módot. */
   onHubChoice: ((id: HubChoice) => void) | null = null;
+  /** A HUB meta-állomásai (Ú3): kódex-pulpitus + rang-obeliszk a sarkokban. */
+  private hubStations: HubStation[] = [];
+  /** A Krónikás NPC pozíciója a HUB-ban (hangulat + felfedés-szöveg). */
+  private hubNpc: { col: number; row: number } | null = null;
+  /** A Krónikás soron következő hangulat-sora (a felfedés-szövegek közt forog). */
+  private hubNpcLine = 0;
+  /** A Game köti be: a játékos egy meta-állomásra lépett → a Game nyitja a nézetet. */
+  onHubStation: ((id: HubStationId) => void) | null = null;
+  /** A Vándor-szobor pozíciója a HUB-ban (#53): rálépve a karakterválasztó nyílik. */
+  private hubCharStation: { col: number; row: number } | null = null;
+  /** Aktív vándor-választó (#53). A hub közben NEM nullázódik (isHub igaz marad). */
+  private charSelect: {
+    cursor: number; prevMouseDown: boolean; prevKeys: Record<string, boolean>;
+  } | null = null;
+  /** A Kihívás-obeliszk pozíciója a HUB-ban (#51): rálépve a kihívás-választó nyílik. */
+  private hubChalStation: { col: number; row: number } | null = null;
+  /** Aktív kihívás-választó (#51), a vándor-választó ikertestvére. */
+  private chalSelect: {
+    cursor: number; prevMouseDown: boolean; prevKeys: Record<string, boolean>;
+  } | null = null;
+  /** Az aktuális futás kihívás-módja (#51), vagy null normál futásnál. */
+  private challenge: ChallengeDef | null = null;
+
+  /**
+   * Aktív boss-roham (HUB boss-portál, #52). Ha be van állítva, a World a 10
+   * bosst egymás után pörgeti egy külön konténer-szobában (`bossRushRoom`), friss
+   * karakterrel. `idx` = a SOROS boss indexe a BOSS_ORDER-ben (= a legyőzöttek
+   * száma). Null = nincs boss-roham.
+   */
+  private bossRush: { idx: number } | null = null;
+  /** A boss-roham külön konténer-szobája (a `dungeon` ÉRINTETLEN marad alatta). */
+  private bossRushRoom: Room | null = null;
+  /** Pendzsel: a bossok közti jutalom-ajánlat → a RENDBEN a következő bosst hozza. */
+  private pendingBossNext = false;
+
+  /**
+   * Aktív Dungeon-mód (HUB dungeon-portál, #52): 15 arénaszoba egymás után, friss
+   * karakterrel, egyre több/erősebb ellenféllel. `room` = a SOROS szoba (1-alapú).
+   * Külön konténer-szoba (`dungeonRoom`), a `dungeon` (graph) érintetlen alatta.
+   */
+  private dungeonRun: { room: number } | null = null;
+  private dungeonRoom: Room | null = null;
+  /** Pendzsel: a dungeon mérföldkő-jutalma → a RENDBEN a következő szobát hozza. */
+  private pendingDungeonNext = false;
+
+  /**
+   * Aktív Labirintus-gauntlet (HUB labirintus-portál, #52): 15 maze-pálya egymás
+   * után, pályánként (pálya-1) ellenféllel, egyre nagyobb/erősebb. `stage` 1-alapú.
+   * A maze-keret a meglévő labyrinth-rendszerre épül; csak a stage-vezérlés új.
+   */
+  private labGauntlet: { stage: number } | null = null;
+  /** Pendzsel: a pályák közti jutalom → a RENDBEN a következő pályát hozza. */
+  private pendingLabNext = false;
+
+  /**
+   * Aktív szakasz-választó (a HUB kihívás-módok belépő oldala, #52). Ha be van
+   * állítva, a portálba lépés NEM indítja a módot azonnal: előbb a kígyózó ösvény
+   * jelenik meg, ahol bármelyik szakasz közvetlenül indítható. A `hub` közben
+   * NEM nullázódik (így a `isHub` igaz marad: nincs HUD, menü-zene), csak a
+   * választó-overlay fut helyette. `cursor` a billentyűs kiemelés indexe; a
+   * `prevMouseDown`/`prevKeys` a felfutó-él-detektáláshoz kell.
+   */
+  private stageSelect: {
+    mode: SelectMode; count: number; cursor: number;
+    prevMouseDown: boolean; prevKeys: Record<string, boolean>;
+    times: Record<string, number>;
+  } | null = null;
+
+  /**
+   * A jelenlegi HUB-szakasz (boss/szoba/maze-pálya) ÉLŐ ideje (mp). Minden
+   * szakasz-build nullázza, az aktív különleges-futás képkockái léptetik, a
+   * szakasz teljesítésekor a `recordStageClear` rögzíti (leggyorsabb rekord).
+   */
+  private stageClock = 0;
 
   private readonly _room: Rect = { x: 0, y: 0, w: 0, h: 0 };
   private _theme: Theme = resolveLevel(1).chapter.theme;
@@ -316,8 +446,8 @@ export class World {
   get room(): Rect { return this._room; }
   get cx(): number { return this._room.x + this._room.w / 2; }
   get cy(): number { return this._room.y + this._room.h / 2; }
-  /** A jelenlegi szoba — hub/labirintus alatt a külön konténer, egyébként a dungeon aktuális szobája. */
-  get currentRoom(): Room { return this.hubRoom ?? this.labRoom ?? this.dungeon.current; }
+  /** A jelenlegi szoba — hub/labirintus/boss-roham alatt a külön konténer, egyébként a dungeon aktuális szobája. */
+  get currentRoom(): Room { return this.hubRoom ?? this.labRoom ?? this.bossRushRoom ?? this.dungeonRoom ?? this.dungeon.current; }
   get enemies(): IEnemy[] { return this.currentRoom.enemies; }
 
   /** Az aktuális szinthez tartozó fejezet azonosítója (a zenei téma-választáshoz). */
@@ -326,6 +456,44 @@ export class World {
   get isLabyrinth(): boolean { return this.labyrinth !== null; }
   /** Igaz, ha épp a hub-terem (mód-választó) fut — harc/szobaváltás nélkül. */
   get isHub(): boolean { return this.hub !== null; }
+  /** Igaz, ha a HUB-mód szakasz-választó oldala aktív (a portál belépő-oldala). */
+  get isStageSelect(): boolean { return this.stageSelect !== null; }
+  /** Igaz, ha a vándor-választó (#53) aktív (a HUB Vándor-szobra nyitotta). */
+  get isCharacterSelect(): boolean { return this.charSelect !== null; }
+  /** Igaz, ha a HUB seed-kapu modalja nyitva van (#49) → a hub be van fagyasztva. */
+  get isSeedGate(): boolean { return this.seedGate; }
+  /** A KÖVETKEZŐ story-futás beírt seed-kódja (üres = friss random). A modal ezt tölti elő. */
+  get pendingSeedStr(): string { return this.pendingSeed ?? ''; }
+  /** A HUB seed-kapu beállítja a következő story-futás seedjét (null/üres = random). */
+  setPendingSeed(s: string | null): void {
+    const v = (s ?? '').trim();
+    this.pendingSeed = v ? v : null;
+  }
+  /** Seed-kapu modal nyitása: a hub befagy (a player nem mozog, az állomás nem újra-trigger). */
+  openSeedGate(): void { this.seedGate = true; this.hubArmed = false; }
+  /** Seed-kapu modal zárása: a hub újra él, az állomások újra élesedhetnek. */
+  closeSeedGate(): void { this.seedGate = false; this.hubArmed = true; }
+  /** Igaz, ha épp a boss-roham mód fut (a HUD/minimap ehhez igazodik). */
+  get isBossRush(): boolean { return this.bossRush !== null; }
+  /** A boss-roham állása: hány bosst győzött le eddig (= a soros boss indexe). */
+  get bossRushStage(): number { return this.bossRush?.idx ?? 0; }
+  /** Igaz, ha épp a Dungeon-mód fut. */
+  get isDungeonRun(): boolean { return this.dungeonRun !== null; }
+  /** Igaz, ha épp a Labirintus-gauntlet fut (a 15-pályás HUB-mód). */
+  get isLabGauntlet(): boolean { return this.labGauntlet !== null; }
+  /**
+   * Egy „különleges futás" (boss-roham / dungeon / labirintus-gauntlet) aktív-e.
+   * Ezek a game-overben a sorszám-alapú „szintet" használják, és NEM mozgatják a
+   * kampány „legmélyebb szint" rekordot (countBestFloor=false).
+   */
+  get isSpecialRun(): boolean { return this.bossRush !== null || this.dungeonRun !== null || this.labGauntlet !== null; }
+  /** A különleges futás állása (legyőzött boss / kipucolt szoba / teljesített pálya), vagy 0. */
+  get specialStage(): number {
+    if (this.bossRush) return this.bossRush.idx;
+    if (this.dungeonRun) return this.dungeonRun.room - 1; // kipucolt szobák száma
+    if (this.labGauntlet) return this.labGauntlet.stage - 1; // teljesített pályák száma
+    return 0;
+  }
   /** Az aktív labirintus objektum (vagy null) — a CollisionSystem ezt olvassa a fal-ütközéshez. */
   get lab(): Labyrinth | null { return this.labyrinth; }
   /** A labirintus visszaszámláló: hátralévő idő (mp), nem-negatív. A HUD olvassa. */
@@ -382,21 +550,40 @@ export class World {
     b.bossId = kind; // bestiárium: melyik boss (az első megöléskor feloldjuk)
     return b;
   }
-  hasNeighbor(dir: Dir): boolean { return this.hub ? false : this.dungeon.hasNeighbor(dir); }
+  hasNeighbor(dir: Dir): boolean { return (this.hub || this.bossRush || this.dungeonRun) ? false : this.dungeon.hasNeighbor(dir); }
   isCurrentRoomCleared(): boolean { return this.currentRoom.cleared; }
   get theme(): Theme { return this._theme; }
   floorName(): string {
+    // különleges futások: a „szint" helyett a sorszám (HUD jobb-felül + game-over)
+    if (this.bossRush) {
+      return tr('hud.bossRush', { n: Math.min(this.bossRush.idx + 1, BOSS_ORDER.length), total: BOSS_ORDER.length });
+    }
+    if (this.dungeonRun) {
+      return tr('hud.dungeonRun', { n: Math.min(this.dungeonRun.room, DUNGEON_RUN.rooms), total: DUNGEON_RUN.rooms });
+    }
+    if (this.labGauntlet) {
+      return tr('hud.labGauntlet', { n: Math.min(this.labGauntlet.stage, LAB_GAUNTLET.stages), total: LAB_GAUNTLET.stages });
+    }
     const lvl = resolveLevel(this.floor);
-    return `${chapterName(lvl.chapter)} ${lvl.index}`;
+    const base = `${chapterName(lvl.chapter)} ${lvl.index}`;
+    // kihívás-mód (#51): a szint mellett a kihívás neve is látszik (HUD + game-over)
+    return this.challenge ? `${base} · ${this.challengeName}` : base;
   }
 
   // ---- Életciklus ----
-  /** Új futás. `startFloor`: a kezdő globális szint (admin „Kipróbálás" egy fejezettől). */
-  newGame(startFloor = 1): void {
+  /** Új futás. `startFloor`: a kezdő globális szint (admin „Kipróbálás" egy fejezettől).
+   *  `challenge`: aktív kihívás-mód (#51) vagy null (normál futás). */
+  newGame(startFloor = 1, challenge: ChallengeDef | null = null): void {
+    this.challenge = challenge;
     this.labyrinth = null; // friss futás mindig normál szoba-módban indul
     this.labRoom = null;
     this.hub = null;
     this.hubRoom = null;
+    this.bossRush = null;
+    this.bossRushRoom = null;
+    this.dungeonRun = null;
+    this.dungeonRoom = null;
+    this.labGauntlet = null;
     this.computeRoom();
     this.floor = Math.max(1, Math.floor(startFloor));
     this.score = 0;
@@ -404,8 +591,18 @@ export class World {
     this.runStats.resetRun();
     this.firstBossVoicePlayed = false;   // új futás → az első boss narrációja megint szólhat
     this._theme = resolveLevel(this.floor).chapter.theme;
-    this.dungeon = new Dungeon(this.floor);
-    this.player.reset(this.cx, this.cy);
+    // Seed-rendszer (#49): a HUB seed-kapun beírt kód, vagy friss random. A teljes
+    // kampány-generálás (layout + ellenfél + tárgy + drop) ebből reprodukálható.
+    this.runSeedStr = this.pendingSeed && this.pendingSeed.trim() ? this.pendingSeed.trim() : randomSeedStr();
+    this.pendingSeed = null; // egy futásra szól, utána vissza random
+    this.runSeed = hashStr(this.runSeedStr);
+    this.dungeon = new Dungeon(this.floor, mix(this.runSeed, this.floor));
+    // a kampány a HUB-on választott vándorral indul (#53); ismeretlen/zárt → az alap
+    const chosen = CHARACTER_BY_ID[loadCharacterId()];
+    const vandor = chosen && isCharacterUnlocked(chosen) ? chosen : CHARACTERS[0];
+    // a vándor fiola-szín→hatás térképe is seedelt (ua. seed = ua. fiola-azonosítók)
+    withRng(mulberry32(mix(this.runSeed, 0xf10a)), () => this.player.reset(this.cx, this.cy, vandor));
+    this.applyChallenge(challenge); // kihívás-mód restrikciói a vándor fölött (#51)
     this.entities.clear();
     this.hazards.clear();
     this.fx.clear();
@@ -427,9 +624,14 @@ export class World {
    * (DUNGEON / BOSS — még nincs megírva) csak „hamarosan" jelzést ad. A
    * `dungeon` (menü-háttér) ÉRINTETLEN marad alatta, mint a labirintusnál.
    */
-  startHub(): void {
+  startHub(unlocks: { boss?: boolean; dungeon?: boolean } = {}): void {
     this.labyrinth = null;
     this.labRoom = null;
+    this.bossRush = null;
+    this.bossRushRoom = null;
+    this.dungeonRun = null;
+    this.dungeonRoom = null;
+    this.labGauntlet = null;
     this.sandbox = false;
     this.hubArmed = true;
     this._theme = resolveLevel(1).chapter.theme;
@@ -437,13 +639,24 @@ export class World {
     this.hubRoom = new Room(0, 0, 'normal');
     this.hubRoom.cleared = true;
     this.hubRoom.spawned = true;
-    // a négy portál a négy fal felé; a labelek a portál ALATT jelennek meg
+    // a négy portál a négy fal felé; a labelek a portál ALATT jelennek meg. A
+    // boss/dungeon zártsága a haladástól függ (#52): a Game adja át a feloldást.
     this.hub = [
       { id: 'story',     col: 6,    row: 0.7, locked: false },
       { id: 'labyrinth', col: 1.2,  row: 3,   locked: false },
-      { id: 'dungeon',   col: 10.8, row: 3,   locked: true },
-      { id: 'boss',      col: 6,    row: 5.3, locked: true },
+      { id: 'dungeon',   col: 10.8, row: 3,   locked: !unlocks.dungeon },
+      { id: 'boss',      col: 6,    row: 5.3, locked: !unlocks.boss },
     ];
+    // meta-állomások a felső sarkokban (Ú3): kódex (bal) + rang (jobb) + seed-kapu
+    // (#49) az alsó-jobb sarokban (a Krónikás párjaként a bal alsóval szemben).
+    this.hubStations = [
+      { id: 'bestiary', col: 2.2,  row: 1.3 },
+      { id: 'rank',     col: 10.8, row: 1.3 },
+      { id: 'seed',     col: 10.5, row: 5 },
+    ];
+    this.hubNpc = { col: 2.2, row: 5 }; // a Krónikás a bal alsó sarokban
+    this.hubCharStation = { col: 4, row: 1.4 }; // Vándor-szobor a story-portál mellett (#53)
+    this.hubChalStation = { col: 8, row: 1.4 }; // Kihívás-obeliszk a másik oldalon (#51)
     this.computeRoom();
     this.player.reset(this.cx, this.cy);
     this.entities.clear();
@@ -458,12 +671,762 @@ export class World {
 
   /** A hub elhagyása (menübe lépéskor): a konténer-szoba eldobása, normál szoba vissza. */
   exitHub(): void {
-    if (!this.hub) return;
+    // a hub ÉS minden HUB-mód (boss-roham / dungeon / labirintus-gauntlet) itt
+    // takarodik ki (a Game menübe lépéskor hívja); ha egyik sincs, nincs teendő.
+    if (!this.hub && !this.bossRush && !this.dungeonRun && !this.labGauntlet) return;
+    this.stageSelect = null;
+    this.charSelect = null;
+    this.chalSelect = null;
+    this.seedGate = false;
     this.hub = null;
+    this.hubStations = [];
+    this.hubNpc = null;
+    this.hubCharStation = null;
+    this.hubChalStation = null;
     this.hubRoom = null;
+    this.bossRush = null;
+    this.bossRushRoom = null;
+    this.dungeonRun = null;
+    this.dungeonRoom = null;
+    this.labGauntlet = null;
+    this.labyrinth = null;
+    this.labRoom = null;
+    this.pendingBossNext = false;
+    this.pendingDungeonNext = false;
+    this.pendingLabNext = false;
     this.floors.invalidate();
     this.props.invalidate();
     this.computeRoom();
+  }
+
+  // ---- Szakasz-választó (HUB kihívás-módok belépő oldala, #52) ----------------
+
+  /** Hány szakaszból áll egy mód (a választó csomópont-száma). */
+  private stageSelectCount(mode: SelectMode): number {
+    return mode === 'boss' ? BOSS_ORDER.length
+      : mode === 'dungeon' ? DUNGEON_RUN.rooms
+      : LAB_GAUNTLET.stages;
+  }
+
+  /**
+   * A HUB egy kihívás-portálja a szakasz-választót nyitja (NEM indítja a módot
+   * azonnal): a `hub` aktív marad (isHub igaz → nincs HUD, menü-zene), de a
+   * választó-overlay fut helyette, ahonnan bármelyik szakasz indítható.
+   */
+  openStageSelect(mode: SelectMode): void {
+    this.computeRoom();
+    this.stageSelect = {
+      mode, count: this.stageSelectCount(mode), cursor: 0,
+      prevMouseDown: this.input.mouse.down, prevKeys: {},
+      times: loadStageTimes(), // a szakasz-rekordok (csomópont alá írt legjobb idők)
+    };
+  }
+
+  /** A választó bezárása (Vissza / ESC): a hub-portálok élesedése a lelépéskor. */
+  closeStageSelect(): void {
+    this.stageSelect = null;
+    this.hubArmed = false; // a játékos a portálon áll → csak lelépés után süthet el újra
+  }
+
+  /** A választó kiosztása (csomópontok + Vissza-gomb) az aktuális szoba-dobozra. */
+  private stageSelectLayout(): SelectLayout {
+    const ss = this.stageSelect!;
+    const bossFlags = this.stageSelectBossFlags(ss.mode, ss.count);
+    return layoutStageSelect(this._room, ss.count, bossFlags);
+  }
+
+  /** Index-szerinti boss/mérföldkő-jelölés (gyémánt-csomópont) módonként. */
+  private stageSelectBossFlags(mode: SelectMode, count: number): boolean[] {
+    const flags: boolean[] = [];
+    for (let i = 0; i < count; i++) {
+      flags.push(
+        mode === 'boss' ? true
+        : mode === 'dungeon' ? DUNGEON_RUN.bossRooms.includes(i + 1)
+        : i + 1 === LAB_GAUNTLET.stages, // a labirintus utolsó pályája a „finálé"
+      );
+    }
+    return flags;
+  }
+
+  /** A kiemelt szakasz leíró felirata (boss-név / szoba / pálya). */
+  private stageSelectCaption(mode: SelectMode, i: number): string {
+    if (i < 0) return '';
+    const n = i + 1;
+    if (mode === 'boss') return BOSS_REGISTRY[BOSS_ORDER[i]!].name;
+    if (mode === 'dungeon') {
+      return DUNGEON_RUN.bossRooms.includes(n)
+        ? tr('select.dungeonBoss', { n }) : tr('select.dungeonRoom', { n });
+    }
+    return tr('select.labStage', { n });
+  }
+
+  /** A kiválasztott szakasz indítása (innen a mód a végéig folytatódik). */
+  private launchStage(mode: SelectMode, i: number): void {
+    this.audio.stairs();
+    if (mode === 'boss') this.startBossRush(i);
+    else if (mode === 'dungeon') this.startDungeonRun(i + 1);
+    else this.startLabGauntlet(i + 1);
+  }
+
+  private updateStageSelect(dt: number): void {
+    const ss = this.stageSelect!;
+    this.computeRoom();
+    this.particles.update(dt);
+    this.fx.update(dt);
+    this.audio.setMusicScene(0); // választó: nyugodt drone (nincs harc)
+
+    const layout = this.stageSelectLayout();
+    const mx = this.input.mouse.x, my = this.input.mouse.y;
+
+    // egér-kiemelés: a kurzor alatti csomópont (ha van) felülírja a billentyűset
+    let hover = -1;
+    for (const node of layout.nodes) {
+      if (dist2(mx, my, node.x, node.y) <= (node.r + 6) ** 2) { hover = node.i; break; }
+    }
+    if (hover >= 0) ss.cursor = hover;
+    const overBack = mx >= layout.back.x && mx <= layout.back.x + layout.back.w
+      && my >= layout.back.y && my <= layout.back.y + layout.back.h;
+
+    // billentyűs navigáció (felfutó él a saját prevKeys-szel; a nyilak szabadok itt)
+    const k = this.input.keys;
+    const edge = (code: string): boolean => {
+      const now = !!k[code];
+      const was = !!ss.prevKeys[code];
+      ss.prevKeys[code] = now;
+      return now && !was;
+    };
+    const cols = layout.perRow;
+    const last = ss.count - 1;
+    if (edge('arrowright') || edge('d')) ss.cursor = Math.min(last, ss.cursor + 1);
+    if (edge('arrowleft') || edge('a')) ss.cursor = Math.max(0, ss.cursor - 1);
+    if (edge('arrowdown') || edge('s')) ss.cursor = Math.min(last, ss.cursor + cols);
+    if (edge('arrowup') || edge('w')) ss.cursor = Math.max(0, ss.cursor - cols);
+    const enter = edge('enter') || edge(' ');
+
+    // egér-kattintás (felfutó él): a kurzor-csomópont vagy a Vissza-gomb
+    const down = this.input.mouse.down;
+    const click = down && !ss.prevMouseDown;
+    ss.prevMouseDown = down;
+
+    if ((click && overBack)) { this.closeStageSelect(); return; }
+    if ((click && hover >= 0) || enter) { this.launchStage(ss.mode, ss.cursor); return; }
+  }
+
+  private renderStageSelect(ctx: CanvasRenderingContext2D): void {
+    const ss = this.stageSelect!;
+    const th = this._theme;
+    ctx.save();
+    ctx.translate(this.fx.camOffX(), this.fx.camOffY());
+
+    ctx.fillStyle = '#0a0810';
+    ctx.fillRect(0, 0, this.engine.width, this.engine.height);
+
+    const rc = this._room;
+    const W = ROOM.WALL;
+    this.drawCachedFloor(ctx);
+    ctx.fillStyle = vignetteGradient(ctx, this.cx, this.cy, rc, th.vignette);
+    ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+    // zárt terem-keret (mint a hub)
+    ctx.fillStyle = th.wall;
+    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, W);
+    ctx.fillRect(rc.x - W, rc.y + rc.h, rc.w + W * 2, W);
+    ctx.fillRect(rc.x - W, rc.y, W, rc.h);
+    ctx.fillRect(rc.x + rc.w, rc.y, W, rc.h);
+    ctx.strokeStyle = th.wallEdge;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(rc.x - 2, rc.y - 2, rc.w + 4, rc.h + 4);
+    ctx.fillStyle = th.wallTop;
+    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, 5);
+
+    this.particles.draw(ctx);
+
+    const layout = this.stageSelectLayout();
+    const mx = this.input.mouse.x, my = this.input.mouse.y;
+    const overBack = mx >= layout.back.x && mx <= layout.back.x + layout.back.w
+      && my >= layout.back.y && my <= layout.back.y + layout.back.h;
+    // a csomópontok alá írt legjobb idők (rekord hiányában null → „- - -")
+    const times = layout.nodes.map((n) => {
+      const rec = ss.times[stageKey(ss.mode, n.i)];
+      return rec !== undefined ? formatTime(rec, true) : null;
+    });
+    drawStageSelect(ctx, rc, layout, {
+      mode: ss.mode,
+      title: tr(`select.title.${ss.mode}`),
+      sub: tr('select.sub'),
+      backLabel: tr('select.back'),
+      hint: tr('select.hint'),
+      caption: this.stageSelectCaption(ss.mode, ss.cursor),
+      times,
+      hover: ss.cursor,
+      backHover: overBack,
+      accent: th.accent,
+      t: performance.now() / 1000,
+    });
+    this.fx.draw(ctx);
+    ctx.restore();
+  }
+
+  // ---- Vándor-választó (#53, HUB Vándor-szobor) -------------------------------
+
+  /** A Vándor-szobron állva a karakterválasztó nyílik (a hub aktív marad). */
+  openCharacterSelect(): void {
+    this.computeRoom();
+    const cur = Math.max(0, CHARACTERS.findIndex((c) => c.id === loadCharacterId()));
+    this.charSelect = { cursor: cur, prevMouseDown: this.input.mouse.down, prevKeys: {} };
+  }
+
+  /** A választó bezárása (Vissza / ESC): a hub-elemek lelépés után élesednek újra. */
+  closeCharacterSelect(): void {
+    this.charSelect = null;
+    this.hubArmed = false;
+  }
+
+  private charSelectLayout(): CharLayout {
+    return layoutCharacterSelect(this._room, CHARACTERS.length);
+  }
+
+  /** Egy vándor stat-nyilai az alaphoz (Zarándok) képest. */
+  private charStats(c: CharacterDef): CharStat[] {
+    const dir = (mul: number | undefined, invert = false): -1 | 0 | 1 => {
+      if (!mul || mul === 1) return 0;
+      const up = invert ? mul < 1 : mul > 1;
+      return up ? 1 : -1;
+    };
+    const hpDir: -1 | 0 | 1 = c.maxHpHearts && c.maxHpHearts !== 3 ? (c.maxHpHearts > 3 ? 1 : -1) : 0;
+    return [
+      { label: tr('char.stat.dmg'), dir: dir(c.dmgMul) },
+      { label: tr('char.stat.spd'), dir: dir(c.speedMul) },
+      { label: tr('char.stat.rate'), dir: dir(c.fireRateMul, true) }, // <1 = gyorsabb = jobb
+      { label: tr('char.stat.hp'), dir: hpDir },
+    ];
+  }
+
+  /** A kártya-nézetek (i18n-feloldott szövegek + nyilak) a render számára. */
+  private charCardViews(): CharCardView[] {
+    return CHARACTERS.map((c) => {
+      // zárt vándor (#53 reward): a titok rejtve, csak a feloldás-feltétel látszik
+      if (!isCharacterUnlocked(c)) {
+        return {
+          name: '???', skill: '', desc: tr('char.locked'),
+          accent: '#968c78', stats: [], locked: true, // hex! (a sigil-rajz hex-et parse-ol)
+        };
+      }
+      const skill = SKILL_BY_ID[c.skillId ?? 'nova'];
+      return {
+        name: tr(`char.${c.id}.name`),
+        skill: tr('char.skillLabel', { skill: skill ? skillName(skill) : '' }),
+        desc: tr(`char.${c.id}.desc`),
+        accent: c.accent,
+        tearColor: c.tearColor,
+        stats: this.charStats(c),
+      };
+    });
+  }
+
+  /** A kiválasztott vándor rögzítése + vissza a hubra. */
+  private confirmCharacter(i: number): void {
+    const c = CHARACTERS[i];
+    if (!c) return;
+    if (!isCharacterUnlocked(c)) { // zárt vándor: tiltva, a feltétel a kártyán
+      const center = this.cellCenter(6, 3);
+      this.addFloater(center.x, center.y - 60, tr('char.locked'), '#cdbb9a');
+      this.audio.denied();
+      return;
+    }
+    saveCharacterId(c.id);
+    this.audio.stairs();
+    const center = this.cellCenter(6, 3);
+    this.addFloater(center.x, center.y - 60, tr('char.chosen', { name: tr(`char.${c.id}.name`) }), c.accent);
+    this.closeCharacterSelect();
+  }
+
+  private updateCharacterSelect(dt: number): void {
+    const cs = this.charSelect!;
+    this.computeRoom();
+    this.particles.update(dt);
+    this.fx.update(dt);
+    this.audio.setMusicScene(0);
+
+    const layout = this.charSelectLayout();
+    const mx = this.input.mouse.x, my = this.input.mouse.y;
+
+    let hover = -1;
+    for (const card of layout.cards) {
+      if (mx >= card.x && mx <= card.x + card.w && my >= card.y - 12 && my <= card.y + card.h) {
+        hover = card.i; break;
+      }
+    }
+    if (hover >= 0) cs.cursor = hover;
+    const overBack = mx >= layout.back.x && mx <= layout.back.x + layout.back.w
+      && my >= layout.back.y && my <= layout.back.y + layout.back.h;
+
+    const k = this.input.keys;
+    const edge = (code: string): boolean => {
+      const now = !!k[code]; const was = !!cs.prevKeys[code];
+      cs.prevKeys[code] = now; return now && !was;
+    };
+    const last = CHARACTERS.length - 1;
+    if (edge('arrowright') || edge('d')) cs.cursor = Math.min(last, cs.cursor + 1);
+    if (edge('arrowleft') || edge('a')) cs.cursor = Math.max(0, cs.cursor - 1);
+    const enter = edge('enter') || edge(' ');
+
+    const down = this.input.mouse.down;
+    const click = down && !cs.prevMouseDown;
+    cs.prevMouseDown = down;
+
+    if (click && overBack) { this.closeCharacterSelect(); return; }
+    if ((click && hover >= 0) || enter) { this.confirmCharacter(cs.cursor); return; }
+  }
+
+  private renderCharacterSelect(ctx: CanvasRenderingContext2D): void {
+    const cs = this.charSelect!;
+    const th = this._theme;
+    ctx.save();
+    ctx.translate(this.fx.camOffX(), this.fx.camOffY());
+    ctx.fillStyle = '#0a0810';
+    ctx.fillRect(0, 0, this.engine.width, this.engine.height);
+
+    const rc = this._room;
+    const W = ROOM.WALL;
+    this.drawCachedFloor(ctx);
+    ctx.fillStyle = vignetteGradient(ctx, this.cx, this.cy, rc, th.vignette);
+    ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+    ctx.fillStyle = th.wall;
+    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, W);
+    ctx.fillRect(rc.x - W, rc.y + rc.h, rc.w + W * 2, W);
+    ctx.fillRect(rc.x - W, rc.y, W, rc.h);
+    ctx.fillRect(rc.x + rc.w, rc.y, W, rc.h);
+    ctx.strokeStyle = th.wallEdge; ctx.lineWidth = 4;
+    ctx.strokeRect(rc.x - 2, rc.y - 2, rc.w + 4, rc.h + 4);
+    ctx.fillStyle = th.wallTop;
+    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, 5);
+    this.particles.draw(ctx);
+
+    const layout = this.charSelectLayout();
+    const mx = this.input.mouse.x, my = this.input.mouse.y;
+    const overBack = mx >= layout.back.x && mx <= layout.back.x + layout.back.w
+      && my >= layout.back.y && my <= layout.back.y + layout.back.h;
+    drawCharacterSelect(ctx, rc, layout, {
+      title: tr('char.title'),
+      sub: tr('char.sub'),
+      hint: tr('char.hint'),
+      backLabel: tr('select.back'),
+      cards: this.charCardViews(),
+      selected: cs.cursor,
+      backHover: overBack,
+      accent: th.accent,
+      t: performance.now() / 1000,
+    });
+    this.fx.draw(ctx);
+    ctx.restore();
+  }
+
+  // ---- Kihívás-módok (#51, HUB Kihívás-obeliszk) ------------------------------
+
+  /** Igaz, ha a kihívás-választó (#51) aktív. */
+  get isChallengeSelect(): boolean { return this.chalSelect !== null; }
+  /** Az aktív kihívás neve a HUD-hoz (üres, ha normál futás). */
+  get challengeName(): string { return this.challenge ? tr(`challenge.${this.challenge.id}.name`) : ''; }
+  /** Az aktív kihívás id-je (a Game a teljesítés-rögzítéshez olvassa), vagy null. */
+  get activeChallengeId(): string | null { return this.challenge?.id ?? null; }
+  /** A futás VÉGSŐ pontja: a nyers pont a kihívás-szorzóval (a game-over ezt használja). */
+  get finalScore(): number { return Math.round(this.score * (this.challenge?.scoreMul ?? 1)); }
+
+  /** A kihívás-mód restrikcióinak alkalmazása a (vándor utáni) kezdő-statokra. */
+  private applyChallenge(c: ChallengeDef | null): void {
+    if (!c) return;
+    const p = this.player;
+    if (c.maxHpHearts) { p.maxHp = HP.heart * c.maxHpHearts; p.hp = p.maxHp; }
+    if (c.dmgMul) p.dmg = Math.round(p.dmg * c.dmgMul);
+    if (c.fireRateMul) p.fireRate = p.fireRate * c.fireRateMul;
+    if (c.sightMul) p.sight = p.sight * c.sightMul;
+    if (c.extraStartPower) p.startPower += c.extraStartPower; // keményebb ellenfelek a meglévő difficulty-úton
+  }
+
+  openChallengeSelect(): void {
+    this.computeRoom();
+    this.chalSelect = { cursor: 0, prevMouseDown: this.input.mouse.down, prevKeys: {} };
+  }
+
+  closeChallengeSelect(): void {
+    this.chalSelect = null;
+    this.hubArmed = false;
+  }
+
+  /** A kihívás-kártyák (a vándor-választó kártya-rendererét újrahasználva). */
+  private chalCardViews(): CharCardView[] {
+    const cleared = loadClearedChallenges();
+    return CHALLENGES.map((c) => ({
+      name: tr(`challenge.${c.id}.name`) + (cleared.has(c.id) ? '  ✓' : ''),
+      skill: tr('challenge.scoreLabel', { mul: c.scoreMul.toFixed(1) }),
+      desc: tr(`challenge.${c.id}.desc`),
+      accent: c.accent,
+      stats: [], // a hatások a leírásban (a nyíl-szemantika itt félrevezető lenne)
+    }));
+  }
+
+  /** A kiválasztott kihívás indítása (friss kampány-futás a kihívás-móddal). */
+  private launchChallenge(i: number): void {
+    const c = CHALLENGES[i];
+    if (!c) return;
+    this.audio.stairs();
+    this.chalSelect = null;
+    this.newGame(1, c);
+  }
+
+  private updateChallengeSelect(dt: number): void {
+    const cs = this.chalSelect!;
+    this.computeRoom();
+    this.particles.update(dt);
+    this.fx.update(dt);
+    this.audio.setMusicScene(0);
+
+    const layout = layoutCharacterSelect(this._room, CHALLENGES.length);
+    const mx = this.input.mouse.x, my = this.input.mouse.y;
+    let hover = -1;
+    for (const card of layout.cards) {
+      if (mx >= card.x && mx <= card.x + card.w && my >= card.y - 12 && my <= card.y + card.h) {
+        hover = card.i; break;
+      }
+    }
+    if (hover >= 0) cs.cursor = hover;
+    const overBack = mx >= layout.back.x && mx <= layout.back.x + layout.back.w
+      && my >= layout.back.y && my <= layout.back.y + layout.back.h;
+
+    const k = this.input.keys;
+    const edge = (code: string): boolean => {
+      const now = !!k[code]; const was = !!cs.prevKeys[code];
+      cs.prevKeys[code] = now; return now && !was;
+    };
+    const last = CHALLENGES.length - 1;
+    if (edge('arrowright') || edge('d')) cs.cursor = Math.min(last, cs.cursor + 1);
+    if (edge('arrowleft') || edge('a')) cs.cursor = Math.max(0, cs.cursor - 1);
+    const enter = edge('enter') || edge(' ');
+
+    const down = this.input.mouse.down;
+    const click = down && !cs.prevMouseDown;
+    cs.prevMouseDown = down;
+
+    if (click && overBack) { this.closeChallengeSelect(); return; }
+    if ((click && hover >= 0) || enter) { this.launchChallenge(cs.cursor); return; }
+  }
+
+  private renderChallengeSelect(ctx: CanvasRenderingContext2D): void {
+    const cs = this.chalSelect!;
+    const th = this._theme;
+    ctx.save();
+    ctx.translate(this.fx.camOffX(), this.fx.camOffY());
+    ctx.fillStyle = '#0a0810';
+    ctx.fillRect(0, 0, this.engine.width, this.engine.height);
+
+    const rc = this._room;
+    const W = ROOM.WALL;
+    this.drawCachedFloor(ctx);
+    ctx.fillStyle = vignetteGradient(ctx, this.cx, this.cy, rc, th.vignette);
+    ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+    ctx.fillStyle = th.wall;
+    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, W);
+    ctx.fillRect(rc.x - W, rc.y + rc.h, rc.w + W * 2, W);
+    ctx.fillRect(rc.x - W, rc.y, W, rc.h);
+    ctx.fillRect(rc.x + rc.w, rc.y, W, rc.h);
+    ctx.strokeStyle = th.wallEdge; ctx.lineWidth = 4;
+    ctx.strokeRect(rc.x - 2, rc.y - 2, rc.w + 4, rc.h + 4);
+    ctx.fillStyle = th.wallTop;
+    ctx.fillRect(rc.x - W, rc.y - W, rc.w + W * 2, 5);
+    this.particles.draw(ctx);
+
+    const layout = layoutCharacterSelect(this._room, CHALLENGES.length);
+    const mx = this.input.mouse.x, my = this.input.mouse.y;
+    const overBack = mx >= layout.back.x && mx <= layout.back.x + layout.back.w
+      && my >= layout.back.y && my <= layout.back.y + layout.back.h;
+    drawCharacterSelect(ctx, rc, layout, {
+      title: tr('challenge.title'),
+      sub: tr('challenge.sub'),
+      hint: tr('challenge.hint'),
+      backLabel: tr('select.back'),
+      cards: this.chalCardViews(),
+      selected: cs.cursor,
+      backHover: overBack,
+      accent: th.accent,
+      t: performance.now() / 1000,
+    });
+    this.fx.draw(ctx);
+    ctx.restore();
+  }
+
+  /**
+   * Boss-roham (#52, HUB boss-portál) indítása: a 10 boss (BOSS_ORDER) egymás
+   * után, FRISS karakterrel, egy külön konténer-szobában (`bossRushRoom`) - a
+   * `dungeon` ÉRINTETLEN marad alatta, mint a labirintusnál. A bossok fix-statúak;
+   * a kihívás a sorrendből + az endurance-ből jön, a játékos pedig bossonként
+   * gyógyul és egy tárgyat kap (build-up gauntlet). A nehézség-referencia rögzített
+   * (`BOSS_RUSH.floor`): a bossok raw-sebzése amúgy sem skálázódik, csak a
+   * megidézett adds + a pont-jutalom érzi.
+   */
+  startBossRush(startIdx = 0): void {
+    this.stageSelect = null;
+    this.labyrinth = null;
+    this.labRoom = null;
+    this.hub = null;
+    this.hubRoom = null;
+    this.dungeonRun = null;
+    this.dungeonRoom = null;
+    this.labGauntlet = null;
+    this.sandbox = false;
+    this.pendingBossNext = false;
+    // a szakasz-választón megadott kezdő-boss (0-alapú); innen a sorozat a végéig megy
+    const idx = clamp(Math.floor(startIdx), 0, BOSS_ORDER.length - 1);
+    this.bossRush = { idx };
+    this.floor = BOSS_RUSH.floor;
+    this.score = 0;
+    this.runStats.resetRun();
+    this.firstBossVoicePlayed = false;
+    // friss karakter (a labirintus/story hub-futás filozófiája: önálló futás)
+    this.dungeon = new Dungeon(this.floor); // háttér-konténer (a render a bossRushRoom-ot használja)
+    this.player.reset(this.cx, this.cy);
+    if (this.player.activeSkillId) unlockSkill(this.player.activeSkillId);
+    const startSkill = this.player.activeSkillId ? SKILL_BY_ID[this.player.activeSkillId] : undefined;
+    if (startSkill) this.player.skillCharge = startSkill.chargeMax;
+    this.buildBossArena(idx);
+  }
+
+  /**
+   * Egy boss-roham aréna felépítése a `idx`. bosshoz: a fejezet-témát a boss
+   * sorszáma adja (2 boss / fejezet → vizuális eszkaláció Pince→Sárkányfészek),
+   * az akadály-elrendezés a fejezet egy boss-sablonjából. A szoba `boss` típusú,
+   * NEM kipucolt → a normál szoba-pucolás-logika ad „BOSS LEGYŐZVE" + csapóajtót,
+   * amit a boss-roham a következő bossra/győzelemre fog le (lásd updateRoom-trapdoor).
+   */
+  private buildBossArena(idx: number): void {
+    const fejezetek = CHAPTERS.filter((c) => c.category === 'fejezet');
+    const chapter = fejezetek[Math.min(Math.floor(idx / 2), fejezetek.length - 1)] ?? CHAPTERS[0]!;
+    this._theme = chapter.theme;
+    const target = BOSS_ORDER[idx]!;
+
+    this.stageClock = 0; // a szakasz-óra nulláról (per-boss legjobb idő méréshez)
+    // friss konténer-szoba (a dungeon érintetlen alatta)
+    this.bossRushRoom = new Room(0, 0, 'boss');
+    this.computeRoom();
+    this.entities.clear();
+    this.hazards.clear();
+    this.fx.clear();
+    this.particles.clear();
+    this.trapdoor = null;
+    this.enemySlowT = 0;
+    this.floors.invalidate();
+    this.props.invalidate();
+
+    const room = this.bossRushRoom;
+    room.decorations = [];
+    this.spawnDecorations(room);
+    const parsed = parseTemplate(pick(chapter.bossTemplates));
+    room.obstacles = parsed.obstacles;
+    room.anim = parsed.anim;
+    room.enemies.length = 0;
+    room.pickups = [];
+    room.pedestal = null;
+    room.splats = [];
+    room.cleared = false;
+    room.spawned = true;
+
+    const at = parsed.boss ?? { col: 6, row: 2, kind: target };
+    const c = this.cellCenter(at.col, at.row);
+    room.enemies.push(this.makeBoss(c.x, c.y, target));
+    this.audio.boss();
+    this.addShake(10);
+    // gótikus névtábla (#60): a boss SAJÁT neve + a fejezet latin idézete
+    this.bossIntro = { name: BOSS_REGISTRY[target].name, quote: chapterBossQuote(chapter), t: 2.4 };
+    this.player.placeAtCenter(this.cx, this.cy);
+    this.doorT = 0;
+  }
+
+  /**
+   * Egy boss legyőzve a boss-rohamban: tovább a következőre, vagy ha az utolsó is
+   * elesett, GYŐZELEM. A bossok közt gyógyulás + egy tárgy-jutalom (megálló kártya
+   * a `pendingBossNext`-szel; a RENDBEN építi fel a következő arénát).
+   */
+  private advanceBossRush(): void {
+    if (!this.bossRush) return;
+    recordStageClear('boss', this.bossRush.idx, this.stageClock); // a most legyőzött boss ideje
+    this.bossRush.idx++;
+    const idx = this.bossRush.idx;
+    // pont-bónusz a legyőzöttek számával skálázva (push-incentíva)
+    this.score += BOSS_RUSH.stageBonus * idx;
+
+    if (idx >= BOSS_ORDER.length) {
+      this.bossRushWin();
+      return;
+    }
+
+    // gyógyulás a következő boss előtt + tárgy-jutalom (build-up)
+    this.player.hp = Math.min(this.player.maxHp, this.player.hp + BOSS_RUSH.healBetween * HP.heart);
+    const reward = rollItem();
+    this.giveItem(reward);
+    this.particles.spawn(this.player.x, this.player.y, '#ffd36a', 22, 220, 0.8);
+    this.trapdoor = null;
+    // megálló jutalom-kártya: a RENDBEN (acceptOffer) építi fel a következő arénát
+    this.pendingBossNext = true;
+    this.callbacks.onOffer({
+      badge: tr('bossrush.reward.badge', { n: idx, total: BOSS_ORDER.length }),
+      title: itemName(reward),
+      desc: itemDesc(reward),
+      sub: tr('bossrush.reward.sub', { hearts: BOSS_RUSH.healBetween }),
+      color: reward.col,
+      acceptLabel: tr('offer.ok'),
+      hideDecline: true,
+    });
+  }
+
+  /** A boss-roham megnyerve (mind a 10 boss): záró-bónusz + győzelem-képernyő. */
+  private bossRushWin(): void {
+    this.score += BOSS_RUSH.stageBonus * BOSS_ORDER.length; // záró-bónusz
+    this.trapdoor = null;
+    this.addFloater(this.player.x, this.player.y - 40, tr('fx.bossRushWin'), '#ffe9a8');
+    this.particles.spawn(this.player.x, this.player.y, '#ffd36a', 40, 320, 1.0);
+    this.callbacks.onWin();
+  }
+
+  // ---- Dungeon-mód (#52, HUB dungeon-portál): 15 arénaszoba egymás után --------
+
+  /**
+   * Dungeon-mód indítása: 15 arénaszoba egymás után (külön konténer-szobában,
+   * `dungeonRoom`), friss karakterrel. Rendes ellenfelek, egyre több + erősebb;
+   * mini-boss az 5./10. szobában, finálé-boss a 15.-ben. A köztes szobák a
+   * csapóajtón MAGUKTÓL léptetnek, a boss-szobák után jutalom-kártya + gyógyulás.
+   */
+  startDungeonRun(startRoom = 1): void {
+    this.stageSelect = null;
+    this.labyrinth = null;
+    this.labRoom = null;
+    this.hub = null;
+    this.hubRoom = null;
+    this.bossRush = null;
+    this.bossRushRoom = null;
+    this.labGauntlet = null;
+    this.sandbox = false;
+    this.pendingDungeonNext = false;
+    // a szakasz-választón megadott kezdő-szoba (1-alapú); innen a 15.-ig megy
+    const room = clamp(Math.floor(startRoom), 1, DUNGEON_RUN.rooms);
+    this.dungeonRun = { room };
+    this.score = 0;
+    this.runStats.resetRun();
+    this.firstBossVoicePlayed = false;
+    this.floor = DUNGEON_RUN.floorBase;
+    this.dungeon = new Dungeon(this.floor); // háttér-konténer (a render a dungeonRoom-ot használja)
+    this.player.reset(this.cx, this.cy);
+    if (this.player.activeSkillId) unlockSkill(this.player.activeSkillId);
+    const startSkill = this.player.activeSkillId ? SKILL_BY_ID[this.player.activeSkillId] : undefined;
+    if (startSkill) this.player.skillCharge = startSkill.chargeMax;
+    this.buildDungeonRoom(room);
+  }
+
+  /**
+   * Egy dungeon-arénaszoba felépítése (1-alapú `roomNo`) - ADAT-vezérelt: a layout
+   * + ellenfelek a `Kazamata` fejezet `roomNo`. szoba-sablonjából jönnek (`maps.ts`
+   * → MAPS.kazamata, az admin MAP csempe-editorában szerkeszthető). A sablon
+   * SORBAN játszódik (nem sorsolás → fix), a boss-szobákban (5/10/15) boss-token van.
+   * A `floor` (nehézség + pont) szobánként nő.
+   */
+  private buildDungeonRoom(roomNo: number): void {
+    const chapter = CHAPTERS.find((c) => c.id === 'kazamata') ?? CHAPTERS[0]!;
+    this._theme = chapter.theme;
+    this.floor = DUNGEON_RUN.floorBase + (roomNo - 1) * DUNGEON_RUN.floorPerRoom;
+    const list = chapter.normalTemplates;
+    const tpl = list[(roomNo - 1) % Math.max(1, list.length)] ?? list[0]!;
+    const parsed = parseTemplate(tpl);
+    const isBoss = parsed.boss !== null;
+
+    this.stageClock = 0; // a szakasz-óra nulláról (per-szoba legjobb idő méréshez)
+    this.dungeonRoom = new Room(0, 0, isBoss ? 'boss' : 'normal');
+    this.computeRoom();
+    this.entities.clear();
+    this.hazards.clear();
+    this.fx.clear();
+    this.particles.clear();
+    this.trapdoor = null;
+    this.enemySlowT = 0;
+    this.floors.invalidate();
+    this.props.invalidate();
+
+    const room = this.dungeonRoom;
+    room.decorations = [];
+    this.spawnDecorations(room);
+    // a szoba KÖZEPÉT szabadon hagyjuk (3×3 cella): ide spawnol a játékos ÉS ide kerül a
+    // csapóajtó (ha a szerkesztett sablon közepére akadály kerülne, az elérhetetlen lenne)
+    const ccol = Math.floor(GRID.W / 2), crow = Math.floor(GRID.H / 2);
+    room.obstacles = parsed.obstacles.filter((o) => Math.abs(o.col - ccol) > 1 || Math.abs(o.row - crow) > 1);
+    room.anim = parsed.anim;
+    room.enemies.length = 0;
+    room.pickups = [];
+    room.pedestal = null;
+    room.splats = [];
+    room.cleared = false;
+    room.spawned = true;
+
+    if (isBoss) {
+      const at = parsed.boss!;
+      const c = this.cellCenter(at.col, at.row);
+      room.enemies.push(this.makeBoss(c.x, c.y, at.kind));
+      this.audio.boss();
+      this.addShake(10);
+      this.bossIntro = { name: BOSS_REGISTRY[at.kind].name, quote: chapterBossQuote(chapter), t: 2.4 };
+    }
+    // ellenfelek a sablon spawn-helyeiről (a token adja a típust → determinisztikus + WYSIWYG)
+    const scale = enemyScale(this.floor, this.player);
+    for (const sp of parsed.spawns) {
+      const c = this.cellCenter(sp.col, sp.row);
+      const kind = sp.slot === 'any' ? chapter.enemyKinds[(sp.col + sp.row) % chapter.enemyKinds.length]! : sp.slot;
+      if (kind === 'roach') this.spawnRoachSwarm(c.x, c.y, room, scale);
+      else room.enemies.push(new Enemy(kind, c.x, c.y, scale));
+    }
+    this.player.placeAtCenter(this.cx, this.cy);
+    this.doorT = 0;
+  }
+
+  /**
+   * Egy dungeon-szoba kipucolva → tovább. A boss-szobák (5/10) után jutalom-kártya
+   * + gyógyulás (mérföldkő), a köztes szobák MAGUKTÓL léptetnek; a 15. után GYŐZELEM.
+   */
+  private advanceDungeon(): void {
+    if (!this.dungeonRun) return;
+    const cleared = this.dungeonRun.room; // a most kipucolt szoba
+    recordStageClear('dungeon', cleared - 1, this.stageClock); // a szoba teljesítési ideje
+    this.score += DUNGEON_RUN.stageBonus * cleared;
+    this.trapdoor = null;
+
+    if (cleared >= DUNGEON_RUN.rooms) { this.dungeonRunWin(); return; }
+    const next = cleared + 1;
+    this.dungeonRun.room = next;
+
+    // mérföldkő (mini-boss után): gyógyulás + tárgy-jutalom megálló kártyával
+    if (DUNGEON_RUN.bossRooms.includes(cleared)) {
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + DUNGEON_RUN.healAmount * HP.heart);
+      const reward = rollItem();
+      this.giveItem(reward);
+      this.particles.spawn(this.player.x, this.player.y, '#ffd36a', 22, 220, 0.8);
+      this.pendingDungeonNext = true;
+      this.callbacks.onOffer({
+        badge: tr('dungeon.reward.badge', { n: cleared, total: DUNGEON_RUN.rooms }),
+        title: itemName(reward),
+        desc: itemDesc(reward),
+        sub: tr('dungeon.reward.sub', { hearts: DUNGEON_RUN.healAmount }),
+        color: reward.col,
+        acceptLabel: tr('offer.ok'),
+        hideDecline: true,
+      });
+    } else {
+      this.buildDungeonRoom(next); // köztes szoba: azonnali továbblépés
+    }
+  }
+
+  /** A dungeon megnyerve (mind a 15 szoba): záró-bónusz + győzelem-képernyő. */
+  private dungeonRunWin(): void {
+    if (this.dungeonRun) this.dungeonRun.room = DUNGEON_RUN.rooms + 1; // a sorszám az ÖSSZESET mutassa (15/15)
+    this.score += DUNGEON_RUN.stageBonus * DUNGEON_RUN.rooms; // záró-bónusz
+    this.trapdoor = null;
+    this.addFloater(this.player.x, this.player.y - 40, tr('fx.dungeonWin'), '#ffe9a8');
+    this.particles.spawn(this.player.x, this.player.y, '#ffd36a', 40, 320, 1.0);
+    this.callbacks.onWin();
   }
 
   /**
@@ -476,10 +1439,23 @@ export class World {
   startLabyrinth(lab: Labyrinth, theme: Theme, enemyKinds: EnemyKind[], chapterId = 'labyrinth'): void {
     this.hub = null;        // hubból indítva a konténer-szoba átadja a helyét a labRoom-nak
     this.hubRoom = null;
+    this.bossRush = null;
+    this.bossRushRoom = null;
+    this.dungeonRun = null;
+    this.dungeonRoom = null;
+    this.labGauntlet = null; // a kampány-kapun át indított labirintus EGY maze (nem gauntlet)
+    this.setupLabyrinthStage(lab, theme, enemyKinds, chapterId);
+  }
+
+  /**
+   * Egy labirintus-PÁLYA felépítése (a kampány-kapu és a HUB-gauntlet közös magja).
+   * A `enemyCount` az ellenfél-szám felső korlátja (a gauntletben pálya-1; ha
+   * nincs megadva, a maze összes spawn-helye benépesül - a kampány-kapu viselkedése).
+   */
+  private setupLabyrinthStage(lab: Labyrinth, theme: Theme, enemyKinds: EnemyKind[], chapterId: string, enemyCount?: number, rng?: () => number): void {
     this.labyrinth = lab;
     this.labChapterId = chapterId;
     this._theme = theme;
-    // a nehézség a MEGLÉVŐ szintből jön (world-kapu: aktuális szint; admin-teszt: 1)
     this.labWon = false;
     this.pendingLabExit = false;
     // Visszaszámláló: a legrövidebb út (pathLen tile) egyenes-séta-ideje, reális
@@ -513,12 +1489,16 @@ export class World {
     const startSkill = this.player.activeSkillId ? SKILL_BY_ID[this.player.activeSkillId] : undefined;
     if (startSkill) this.player.skillCharge = startSkill.chargeMax;
 
-    this.spawnLabEnemies(lab, enemyKinds);
+    this.spawnLabEnemies(lab, enemyKinds, enemyCount, rng);
   }
 
-  /** Labirintus-ellenfelek a maze spawn-helyeire, a fejezet palettájából sorsolva. */
-  private spawnLabEnemies(lab: Labyrinth, kinds: EnemyKind[]): void {
-    if (kinds.length === 0) return;
+  /**
+   * Labirintus-ellenfelek a maze spawn-helyeire, a fejezet palettájából sorsolva.
+   * `maxCount`: ha megadva, csak ennyi ellenfél kerül ki (a gauntlet pálya-1-et
+   * ad; a kampány-kapu nem ad korlátot → minden spawn-hely benépesül).
+   */
+  private spawnLabEnemies(lab: Labyrinth, kinds: EnemyKind[], maxCount?: number, rng?: () => number): void {
+    if (kinds.length === 0 || maxCount === 0) return;
     // A labirintusban NINCS repülő ellenfél: a `floats` típusok átszállnának a
     // maze falain (egy útvesztőben értelmetlen), ezért kiszűrjük őket. Ha a
     // fejezet palettája CSAK repülőkből áll, maradunk az eredetinél, hogy legyen
@@ -527,8 +1507,17 @@ export class World {
     const pool = grounded.length > 0 ? grounded : kinds;
     const TILE = ROOM.TILE;
     const scale = enemyScale(this.floor, this.player);
-    for (const s of lab.spawns) {
-      const kind = pick(pool);
+    // a gauntletben a START-tól TÁVOLI spawnokat preferáljuk (ne a kezdőcellára
+    // essen ellenfél), és csak `maxCount`-ot népesítünk be
+    let spawns = lab.spawns;
+    if (maxCount !== undefined && maxCount < spawns.length) {
+      const sx = lab.start.col, sy = lab.start.row;
+      spawns = [...spawns]
+        .sort((a, b) => ((b.col - sx) ** 2 + (b.row - sy) ** 2) - ((a.col - sx) ** 2 + (a.row - sy) ** 2))
+        .slice(0, maxCount);
+    }
+    for (const s of spawns) {
+      const kind = rng ? spick(pool, rng) : pick(pool); // rng → determinisztikus típus-választás
       const x = (s.col + 0.5) * TILE;
       const y = (s.row + 0.5) * TILE;
       this.currentRoom.enemies.push(new Enemy(kind, x, y, scale));
@@ -558,6 +1547,91 @@ export class World {
     this.computeRoom();
   }
 
+  // ---- Labirintus-gauntlet (#52, HUB labirintus-portál): 15 maze-pálya ---------
+
+  /**
+   * Labirintus-gauntlet indítása: 15 maze-pálya egymás után, friss karakterrel,
+   * pályánként (pálya-1) ellenféllel, egyre nagyobb + erősebb. A maze-keret a
+   * meglévő labyrinth-rendszer; a stage-vezérlés + a kontrollált ellenfél-szám új.
+   */
+  startLabGauntlet(startStage = 1): void {
+    this.stageSelect = null;
+    this.hub = null;
+    this.hubRoom = null;
+    this.bossRush = null;
+    this.bossRushRoom = null;
+    this.dungeonRun = null;
+    this.dungeonRoom = null;
+    this.sandbox = false;
+    this.pendingLabNext = false;
+    this.onLabyrinthExit = null; // a gauntlet győzelme/halála a game-overre visz (nem hub-vissza)
+    // a szakasz-választón megadott kezdő-pálya (1-alapú); innen a 15.-ig megy
+    const stage = clamp(Math.floor(startStage), 1, LAB_GAUNTLET.stages);
+    this.labGauntlet = { stage };
+    this.score = 0;
+    this.runStats.resetRun();
+    this.dungeon = new Dungeon(1); // háttér-konténer
+    this.player.reset(0, 0);
+    if (this.player.activeSkillId) unlockSkill(this.player.activeSkillId);
+    this.buildLabStage(stage);
+  }
+
+  /** Egy gauntlet-pálya felépítése (1-alapú `stage`) - ADAT-vezérelt: a maze-config a
+   *  `Labirintus <stage>` fejezetből (`chapterOverrides.ts`, az adminban szerkeszthető).
+   *  A maze fix seedje az adatban → a pálya MINDIG ugyanaz; az ellenfél-típus-választás
+   *  seedelt (determinisztikus). Ellenfél-szám = (pálya − 1). */
+  private buildLabStage(stage: number): void {
+    const chapter = CHAPTERS.find((c) => c.id === `labirintus${stage}`)
+      ?? CHAPTERS.find((c) => c.category === 'kulonleges') ?? CHAPTERS[0]!;
+    const cfg = chapter.labyrinth ?? { cols: 8, rows: 5, loop: 0.12, enemyDensity: 0.25, seed: 1000 + stage };
+    this.floor = LAB_GAUNTLET.floorBase + (stage - 1) * LAB_GAUNTLET.floorPerStage;
+    const rng = mulberry32(LAB_SEED_BASE + ((cfg.seed >>> 0) || 1) + stage);
+    const lab = generateLabyrinth(cfg);
+    this.stageClock = 0; // a szakasz-óra nulláról (per-pálya legjobb idő méréshez)
+    // pályánkénti ellenfél-szám = (pálya - 1): 1. pálya 0 ellenfél, …, 15. pálya 14
+    this.setupLabyrinthStage(lab, chapter.theme, chapter.enemyKinds, chapter.id, stage - 1, rng);
+  }
+
+  /** Egy gauntlet-pálya teljesítve (kijárat elérve): jutalom + tovább, vagy győzelem. */
+  private advanceLabGauntlet(): void {
+    if (!this.labGauntlet) return;
+    const stage = this.labGauntlet.stage;
+    recordStageClear('labyrinth', stage - 1, this.stageClock); // a pálya teljesítési ideje
+    this.score += LAB_GAUNTLET.stageBonus * stage;
+    recordLabClear(this.labChapterId, this.runStats.lab);
+    this.runStats.labsCleared++;
+    this.audio.door();
+
+    if (stage >= LAB_GAUNTLET.stages) { this.labGauntletWin(); return; }
+
+    // jutalom a pályáért (a karakteren marad): tárgy + érme - build-up a következő pályára
+    const reward = rollItem();
+    this.giveItem(reward);
+    const coins = 6 + stage * 2;
+    this.player.coins += coins;
+    this.score += coins * 25;
+    this.particles.spawn(this.player.x, this.player.y, '#ffd36a', 22, 220, 0.8);
+    this.pendingLabNext = true;
+    this.callbacks.onOffer({
+      badge: tr('labg.reward.badge', { n: stage, total: LAB_GAUNTLET.stages }),
+      title: itemName(reward),
+      desc: itemDesc(reward),
+      sub: tr('labg.reward.sub', { coins }),
+      color: reward.col,
+      acceptLabel: tr('offer.ok'),
+      hideDecline: true,
+    });
+  }
+
+  /** A gauntlet megnyerve (mind a 15 pálya): záró-bónusz + győzelem-képernyő. */
+  private labGauntletWin(): void {
+    if (this.labGauntlet) this.labGauntlet.stage = LAB_GAUNTLET.stages + 1; // a sorszám az ÖSSZESET mutassa (15/15)
+    this.score += LAB_GAUNTLET.stageBonus * LAB_GAUNTLET.stages; // záró-bónusz
+    this.clearLabyrinthState(); // a game-over a normál nézettel jöjjön (a labGauntlet flag marad a sorszámhoz)
+    this.addFloater(this.player.x, this.player.y - 40, tr('fx.labGauntletWin'), '#ffe9a8');
+    this.callbacks.onWin();
+  }
+
   /** Igaz, ha a (col,row) maze-cella tömör fal (a pályán kívül is fal). */
   /**
    * Admin · teszt-aréna: egyetlen ellenfelet (vagy bosst) dob be egy véletlen
@@ -569,6 +1643,11 @@ export class World {
     this.labRoom = null;
     this.hub = null;
     this.hubRoom = null;
+    this.bossRush = null;
+    this.bossRushRoom = null;
+    this.dungeonRun = null;
+    this.dungeonRoom = null;
+    this.labGauntlet = null;
     this.computeRoom();
     this.floor = 1 + Math.floor(rand(0, 24)); // véletlen szint → véletlen téma/akadályok
     this.score = 0;
@@ -625,6 +1704,11 @@ export class World {
     this.labRoom = null;
     this.hub = null;
     this.hubRoom = null;
+    this.bossRush = null;
+    this.bossRushRoom = null;
+    this.dungeonRun = null;
+    this.dungeonRoom = null;
+    this.labGauntlet = null;
     this.computeRoom();
     // A kiválasztott pályát közvetlenül az id-ja alapján oldjuk fel — így a
     // kampányon kívüli (dungeon/különleges) pályák is tesztelhetők a saját
@@ -700,7 +1784,23 @@ export class World {
   }
 
   // ---- Szobatartalom ----
+  /**
+   * Egy szoba determinisztikus seedje (seed-rendszer, #49): a futás-seedből + a
+   * szinből + a szoba rács-koordinátáiból. A szoba TARTALMA (sablon, ellenfél-típus
+   * + pozíció, champion, tárgy) és a kipucolás-DROPja ebből reprodukálható.
+   */
+  private roomSeed(room: Room): number {
+    return mix(mix(this.runSeed, this.floor), mix(room.gx | 0, room.gy | 0));
+  }
+
   private spawnRoomContents(room: Room): void {
+    // A teljes tartalom-generálás a szoba seedjéből (a hívási helyek érintése nélkül:
+    // a `withRng`-scope alatt minden `rand`/`pick` determinisztikus). A drop külön
+    // seedet kap (lásd a kipucolásnál), hogy ölés-sorrendtől független legyen.
+    withRng(mulberry32(this.roomSeed(room)), () => this.spawnRoomContentsSeeded(room));
+  }
+
+  private spawnRoomContentsSeeded(room: Room): void {
     room.decorations = [];
 
     if (room.type === 'item') {
@@ -720,6 +1820,36 @@ export class World {
       room.pedestal = new Pedestal(this.cx, this.cy - 188, freeItem);
       room.pedestal.label = tr('fx.free', { name: itemName(freeItem) });
       room.shop = new Shop(this.cx, this.cy);
+      return;
+    }
+
+    if (room.type === 'blood') {
+      // VÉR-OLTÁR (#35): kockázat/jutalom terem - tárgy ÉLETPONTÉRT, nem érméért.
+      // Tiszta, harc nélküli szoba (mint a szerencse-szoba), saját vér-oltárral.
+      room.cleared = true;
+      room.anim = null;
+      room.obstacles = [];
+      room.bloodAltar = new BloodAltar(this.cx, this.cy);
+      return;
+    }
+
+    if (room.type === 'curse') {
+      // ÁTOKVEREM (#38): kockázat/jutalom terem - EGY ritka tárgy, fix 1 szívért,
+      // EGYSZER. Tiszta, harc nélküli szoba (mint a vér-oltár), átok-reliquáriummal.
+      room.cleared = true;
+      room.anim = null;
+      room.obstacles = [];
+      room.curseAltar = new CurseAltar(this.cx, this.cy);
+      return;
+    }
+
+    if (room.type === 'secret') {
+      // TITKOS SZOBA (#37): bombázással feltárt forrás-cache. Harc nélküli, tiszta
+      // szoba; a jutalom érme-szórás + 1 garantált fogyó + ritkán ingyen tárgy.
+      room.cleared = true;
+      room.anim = null;
+      room.obstacles = [];
+      this.spawnSecretReward(room);
       return;
     }
 
@@ -764,6 +1894,17 @@ export class World {
       if (kind === 'roach') this.spawnRoachSwarm(c.x, c.y, room, scale);
       else room.enemies.push(new Enemy(kind, c.x, c.y, scale, false, this.rollChampion()));
     }
+    // Horda-kihívás (#51): extra ellenfelek a meglévő spawn-pontok köré szórva
+    // (plafonos: csak ha van legalább 1 spawn, és a fejezet palettájából).
+    if (this.challenge?.enemyExtra && parsed.spawns.length > 0) {
+      for (let i = 0; i < this.challenge.enemyExtra; i++) {
+        const base = parsed.spawns[i % parsed.spawns.length]!;
+        const c = this.cellCenter(base.col, base.row);
+        const x = c.x + (random() - 0.5) * 80;
+        const y = c.y + (random() - 0.5) * 80;
+        room.enemies.push(new Enemy(pick(chapter.enemyKinds), x, y, scale, false, this.rollChampion()));
+      }
+    }
   }
 
   /** Csótány-raj: 20 db egy pont köré, közülük pontosan egy a harapós (sebző). */
@@ -777,9 +1918,12 @@ export class World {
     }
   }
 
-  /** Champion-variáns sorsolása egy spawn-hoz (Wave 3); null = sima ellenfél. */
-  private rollChampion(): ChampionTrait | null {
-    return Math.random() < TUNING.championChance ? pick(CHAMPION_TRAITS) : null;
+  /** Champion-variáns sorsolása egy spawn-hoz (Wave 3); null = sima ellenfél.
+   *  `rng` megadva: DETERMINISZTIKUS (a HUB-módok fix pályáihoz). Megadás nélkül a
+   *  globális forráson át (a kampány-szoba seed-scope-jában szintén determinisztikus). */
+  private rollChampion(rng?: () => number): ChampionTrait | null {
+    const r = rng ?? random;
+    return r() < TUNING.championChance ? spick(CHAMPION_TRAITS, r) : null;
   }
 
   /** Futás közbeni ellenfél-hozzáadás (pl. megidéző) — a mélységhez skálázva. */
@@ -992,10 +2136,22 @@ export class World {
   }
 
   dropPickup(x: number, y: number): void {
+    // Fiola (#44): kis FÜGGETLEN esély a többi pickup elé (kockázat/jutalom fogyó).
+    // Külön rétegként él, hogy a meglévő nettó-súlyokat (érme/bomba/szív/TNT) ne hígítsa.
+    if (random() < FIOLA.dropChance) {
+      const colorIdx = randi(0, FIOLA_COLORS.length - 1);
+      this.currentRoom.pickups.push(new Pickup(x, y, 'fiola', colorIdx));
+      return;
+    }
+    // Sorslap (#46/#47): a fiola UTÁN egy MÁSODIK független fogyó-réteg (kártya/rúna).
+    if (random() < CARD.dropChance) {
+      this.currentRoom.pickups.push(new Pickup(x, y, 'card', 0, rollCardEffect()));
+      return;
+    }
     // A típus a nettó-súlyok arányában (a gate már eldöntötte, hogy esik valami).
     const n = dropConfig.nets;
     const total = netSum();
-    let r = Math.random() * (total > 0 ? total : 1);
+    let r = random() * (total > 0 ? total : 1);
     let type: PickupType = 'coin';
     if ((r -= n.coin) < 0) type = 'coin';
     else if ((r -= n.bomb) < 0) type = 'bomb';
@@ -1013,10 +2169,43 @@ export class World {
     }
   }
 
+  /**
+   * Titkos szoba (#37) jutalma: forrás-cache. Érme-szórás + EGY garantált fogyó
+   * (súlyozott: bomba/TNT/fiola/sorslap - részben visszatéríti a bomba-költséget),
+   * + `SECRET.itemChance` eséllyel egy INGYEN tárgy-pedesztál (a „jackpot").
+   */
+  private spawnSecretReward(room: Room): void {
+    // érme-szórás a szoba közepe köré
+    for (let i = 0; i < SECRET.coins; i++) {
+      const a = rand(0, TAU);
+      const d = rand(24, 92);
+      room.pickups.push(new Pickup(this.cx + Math.cos(a) * d, this.cy + Math.sin(a) * d, 'coin'));
+    }
+    // 1 garantált fogyó (súlyozott)
+    const r = random();
+    const cy = this.cy + 60;
+    if (r < 0.34) room.pickups.push(new Pickup(this.cx, cy, 'bomb'));
+    else if (r < 0.5) room.pickups.push(new Pickup(this.cx, cy, 'tnt'));
+    else if (r < 0.78) room.pickups.push(new Pickup(this.cx, cy, 'fiola', randi(0, FIOLA_COLORS.length - 1)));
+    else room.pickups.push(new Pickup(this.cx, cy, 'card', 0, rollCardEffect()));
+    // ritkán INGYEN tárgy-pedesztál (a tárgy a collectItem-en megy → difficulty beépíti)
+    if (random() < SECRET.itemChance) {
+      const freeItem = rollItem();
+      room.pedestal = new Pedestal(this.cx, this.cy - 150, freeItem);
+      room.pedestal.label = tr('fx.free', { name: itemName(freeItem) });
+    }
+  }
+
   /** A felugró ablak „Megveszem / Felveszem / Rendben" gombja. */
   acceptOffer(): void {
     // labirintus-jutalom kártyája: a RENDBEN kilép a labirintusból
     if (this.pendingLabExit) { this.pendingLabExit = false; this.exitLabyrinth(); return; }
+    // labirintus-gauntlet pályák közti jutalma: a RENDBEN a következő pályát hozza
+    if (this.pendingLabNext) { this.pendingLabNext = false; if (this.labGauntlet) { this.labGauntlet.stage++; this.buildLabStage(this.labGauntlet.stage); } return; }
+    // boss-roham bossok közti jutalma: a RENDBEN a következő arénát építi fel
+    if (this.pendingBossNext) { this.pendingBossNext = false; this.buildBossArena(this.bossRush?.idx ?? 0); return; }
+    // dungeon-mód mérföldkő-jutalma: a RENDBEN a következő szobát építi fel
+    if (this.pendingDungeonNext) { this.pendingDungeonNext = false; this.buildDungeonRoom(this.dungeonRun?.room ?? 1); return; }
     // puszta értesítő ablak (pl. „Nem nyertél") — csak bezár
     if (this.pendingNotice) { this.pendingNotice = false; return; }
 
@@ -1029,6 +2218,36 @@ export class World {
     const pd = this.pendingPedestal;
     this.pendingPedestal = null;
     if (pd && !pd.taken) { this.collectPedestal(pd); return; }
+
+    // vér-oltár vásárlás: ÉLET a fizetség (nem érme)
+    const bs = this.pendingBlood;
+    this.pendingBlood = null;
+    if (bs && !bs.sold) {
+      if (this.player.hp <= bs.cost) {
+        // nem fizethetsz vért, ha az megölne (legalább 1 fél szív maradjon)
+        this.audio.denied();
+        this.addFloater(this.player.x, this.player.y - 30, tr('fx.noBlood'), '#ff6a6a');
+        bs.declined = true;
+        return;
+      }
+      this.buyBlood(bs);
+      return;
+    }
+
+    // átokverem fizetség: ÉLET a fizetség (egyszeri, ritka jutalomért)
+    const cs = this.pendingCurse;
+    this.pendingCurse = null;
+    if (cs && !cs.sold) {
+      if (this.player.hp <= cs.cost) {
+        // nem fizethetsz, ha az megölne (legalább 1 fél szív maradjon)
+        this.audio.denied();
+        this.addFloater(this.player.x, this.player.y - 30, tr('fx.noBlood'), '#ff6a6a');
+        cs.declined = true;
+        return;
+      }
+      this.buyCurse(cs);
+      return;
+    }
 
     const s = this.pendingStall;
     this.pendingStall = null;
@@ -1048,6 +2267,12 @@ export class World {
   declineOffer(): void {
     // labirintus-jutalom kártyája: ESC is kilép (a jutalom már a játékoson van)
     if (this.pendingLabExit) { this.pendingLabExit = false; this.exitLabyrinth(); return; }
+    // labirintus-gauntlet pályák közti jutalma: ESC is tovább léptet
+    if (this.pendingLabNext) { this.pendingLabNext = false; if (this.labGauntlet) { this.labGauntlet.stage++; this.buildLabStage(this.labGauntlet.stage); } return; }
+    // boss-roham jutalma: ESC is tovább léptet (a tárgy/gyógyulás már megvan)
+    if (this.pendingBossNext) { this.pendingBossNext = false; this.buildBossArena(this.bossRush?.idx ?? 0); return; }
+    // dungeon mérföldkő-jutalma: ESC is tovább léptet
+    if (this.pendingDungeonNext) { this.pendingDungeonNext = false; this.buildDungeonRoom(this.dungeonRun?.room ?? 1); return; }
     if (this.pendingNotice) { this.pendingNotice = false; return; }
     const gi = this.pendingGambleItem;
     this.pendingGambleItem = null;
@@ -1058,6 +2283,12 @@ export class World {
     const pd = this.pendingPedestal;
     this.pendingPedestal = null;
     if (pd) { pd.declined = true; return; }
+    const bs = this.pendingBlood;
+    this.pendingBlood = null;
+    if (bs) { bs.declined = true; return; }
+    const cs = this.pendingCurse;
+    this.pendingCurse = null;
+    if (cs) { cs.declined = true; return; }
     const s = this.pendingStall;
     this.pendingStall = null;
     if (s) s.declined = true;
@@ -1069,12 +2300,41 @@ export class World {
     else unlockPerk(item.name);
   }
 
-  /** Egy megnyert/elfogadott tárgy felvétele a játékosra (hang + effekt). */
-  private giveItem(item: Item): void {
+  /**
+   * Egy tárgy felvétele a játékosra: hatás + kódex-feloldás + a felvett-listára
+   * fűzés + kinézet-frissítés + SZETT-tier-ellenőrzés. MINDEN felvétel-útvonal
+   * (pedesztál/bolt/sorsoló/jackpot/admin) ezt hívja, hogy a szett-bónuszok
+   * egységesen aktiválódjanak. A hang/részecske a hívónál marad (útvonalanként eltér).
+   */
+  collectItem(item: Item): void {
     item.apply(this.player);
     this.registerCollected(item);
     this.player.collected.push(item);
     this.player.refreshLook();
+    this.applySetTiers(item);
+  }
+
+  /**
+   * Felvételkor a tárgy minden szett-címkéjére: ha az ÚJ darabszám PONT egy
+   * küszöböt ér el, a tier bónusza egyszer lefut + aktiválás-floater. (A számláló
+   * felvételenként +1, így minden tier pontosan egyszer sül el a küszöbnél.)
+   */
+  private applySetTiers(item: Item): void {
+    if (!item.tags) return;
+    const p = this.player;
+    for (const id of item.tags) {
+      const tier = tierAtExactly(ITEM_SETS[id], setCount(p.collected, id));
+      if (!tier) continue;
+      tier.apply(p);
+      unlockSetTier(id, tier.need); // a Kódex RENDEK fülén a hatás aktiválás után tárul fel
+      const set = ITEM_SETS[id];
+      this.addFloater(p.x, p.y - 48, `${tr(set.nameKey)} · ${tr(tier.descKey)}`, set.color);
+    }
+  }
+
+  /** Egy megnyert/elfogadott tárgy felvétele a játékosra (hang + effekt). */
+  private giveItem(item: Item): void {
+    this.collectItem(item);
     this.audio.item();
     this.addFloater(this.player.x, this.player.y - 30, tr('fx.pickup', { name: itemName(item), desc: itemDesc(item) }), item.col);
     this.particles.spawn(this.player.x, this.player.y, item.col, 22, 260, 0.8);
@@ -1083,10 +2343,7 @@ export class World {
   /** Ingyenes pedesztál-tárgy felvétele: alkalmazás + hang/effekt. */
   private collectPedestal(pd: Pedestal): void {
     pd.taken = true;
-    pd.item.apply(this.player);
-    this.registerCollected(pd.item);
-    this.player.collected.push(pd.item);
-    this.player.refreshLook();
+    this.collectItem(pd.item);
     this.audio.item();
     this.addFloater(this.player.x, this.player.y - 30, tr('fx.pickup', { name: itemName(pd.item), desc: itemDesc(pd.item) }), pd.item.col);
     this.particles.spawn(pd.x, pd.y, pd.item.col, 20, 200, 0.7);
@@ -1100,10 +2357,7 @@ export class World {
     this.particles.spawn(s.x, s.y - 20, '#ffd36a', 8, 160, 0.5);
     if (s.offer.kind === 'item') {
       const item = s.offer.item;
-      item.apply(this.player);
-      this.registerCollected(item);
-      this.player.collected.push(item);
-      this.player.refreshLook();
+      this.collectItem(item);
       this.addFloater(this.player.x, this.player.y - 30, tr('fx.pickup', { name: itemName(item), desc: itemDesc(item) }), item.col);
     } else {
       const c = s.offer.cons;
@@ -1187,10 +2441,7 @@ export class World {
         // skill-tárgy: NEM cseréljük le azonnal — a játékos dönt a felugró ablakban
         this.offerGambleSkill(item);
       } else {
-        item.apply(p);
-        this.registerCollected(item);
-        p.collected.push(item);
-        p.refreshLook();
+        this.collectItem(item);
       }
     }
   }
@@ -1273,6 +2524,89 @@ export class World {
       });
       return;
     }
+  }
+
+  /** Pont → szív-szöveg a vér-oltár ablakhoz (egész szív → „2", tört → „1,5"). */
+  private heartsLabel(points: number): string {
+    const h = points / HP.heart;
+    return h % 1 === 0 ? String(h) : h.toFixed(1).replace('.', ',');
+  }
+
+  private updateBloodAltar(altar: BloodAltar, dt: number): void {
+    altar.update(dt);
+    if (this.pendingStall || this.pendingPedestal || this.pendingBlood) return;
+    const p = this.player;
+    for (const s of altar.stands) {
+      if (s.sold) continue;
+      const near = dist2(s.x, s.y, p.x, p.y) < (p.r + 18) ** 2;
+      if (!near) { s.declined = false; continue; }
+      if (s.declined) continue;
+      this.pendingBlood = s;
+      this.callbacks.onOffer({
+        badge: tr('offer.blood.badge'),
+        title: itemName(s.item),
+        desc: itemDesc(s.item),
+        sub: tr('offer.blood.price', { hearts: this.heartsLabel(s.cost), have: this.heartsLabel(p.hp) }),
+        color: s.item.col,
+        acceptLabel: tr('offer.blood.buy', { hearts: this.heartsLabel(s.cost) }),
+      });
+      return;
+    }
+  }
+
+  /** Vér-oltár vásárlás: ÉLETPONT-fizetség + tárgy felvétele (hang + vér-effekt). */
+  private buyBlood(s: BloodStand): void {
+    const p = this.player;
+    s.sold = true;
+    p.hp = Math.max(1, p.hp - s.cost); // a guard miatt sosem 0; biztonsági alsó vágás
+    this.addShake(7);
+    this.audio.hurt();
+    this.particles.spawn(p.x, p.y, '#c01828', 22, 240, 0.7); // vér-fröccs a játékoson
+    this.particles.spawn(s.x, s.y - 20, s.item.col, 16, 200, 0.6);
+    this.collectItem(s.item);
+    this.addFloater(p.x, p.y - 30, tr('fx.pickup', { name: itemName(s.item), desc: itemDesc(s.item) }), s.item.col);
+    this.addFloater(p.x, p.y - 52, `-${this.heartsLabel(s.cost)} ♥`, '#ff5b6a');
+  }
+
+  /**
+   * Átok-reliquárium ajánlat (#38): proximity → felugró ablak. A vér-oltár
+   * mintájára, de EGY ajánlat (átok-téma). A `pendingCurse` zárolja a többi
+   * ajánlatot, amíg el nem dönti.
+   */
+  private updateCurseAltar(altar: CurseAltar, dt: number): void {
+    altar.update(dt);
+    if (this.pendingStall || this.pendingPedestal || this.pendingBlood || this.pendingCurse) return;
+    const p = this.player;
+    for (const s of altar.stands) {
+      if (s.sold) continue;
+      const near = dist2(s.x, s.y, p.x, p.y) < (p.r + 18) ** 2;
+      if (!near) { s.declined = false; continue; }
+      if (s.declined) continue;
+      this.pendingCurse = s;
+      this.callbacks.onOffer({
+        badge: tr('offer.curse.badge'),
+        title: itemName(s.item),
+        desc: itemDesc(s.item),
+        sub: tr('offer.curse.price', { hearts: this.heartsLabel(s.cost), have: this.heartsLabel(p.hp) }),
+        color: s.item.col,
+        acceptLabel: tr('offer.curse.buy', { hearts: this.heartsLabel(s.cost) }),
+      });
+      return;
+    }
+  }
+
+  /** Átokverem fizetség: EGY szív (élet) → INGYEN ritka tárgy (hang + átok-effekt). */
+  private buyCurse(s: CurseStand): void {
+    const p = this.player;
+    s.sold = true;
+    p.hp = Math.max(1, p.hp - s.cost); // a guard miatt sosem 0; biztonsági alsó vágás
+    this.addShake(7);
+    this.audio.hurt();
+    this.particles.spawn(p.x, p.y, '#7b3fd0', 22, 240, 0.7); // lila átok-fröccs a játékoson
+    this.particles.spawn(s.x, s.y - 20, s.item.col, 16, 200, 0.6);
+    this.collectItem(s.item);
+    this.addFloater(p.x, p.y - 30, tr('fx.pickup', { name: itemName(s.item), desc: itemDesc(s.item) }), s.item.col);
+    this.addFloater(p.x, p.y - 52, `-${this.heartsLabel(s.cost)} ♥`, '#ff5b6a');
   }
 
   // ---- Aktív skillek ----
@@ -1815,6 +3149,127 @@ export class World {
     this.audio.bombDrop();
   }
 
+  /**
+   * Fiola kiivása (#44, F-gomb): a következő (legrégebbi) fiolát fogyasztja, a
+   * futáson belüli szín→hatás társítás (`fiolaMap`) szerinti hatást alkalmazza, és
+   * az első kiivásnál FELFEDI a hatást (`fiolaSeen`). A hatások a MEGLÉVŐ státuszokra
+   * épülnek; a bad-trip (burn) tét: a DoT-ot a `updateSelfBurn` tickeli, killhet.
+   */
+  private drinkFiola(): void {
+    const p = this.player;
+    if (!p.alive || p.fiolas.length === 0) return;
+    const colorIdx = p.fiolas.shift()!;
+    const effId = p.fiolaMap[colorIdx] ?? 'heal';
+    const def = FIOLA_EFFECT_BY_ID[effId];
+    const firstReveal = !p.fiolaSeen[colorIdx];
+    p.fiolaSeen[colorIdx] = true;
+    if (firstReveal) markFiolaSeen(effId); // Kódex feloldás-kapu (futásokon át)
+
+    this.audio.pickup();
+    switch (effId) {
+      case 'heal':
+        p.hp = clamp(p.hp + FIOLA.heal, 0, p.maxHp);
+        this.particles.spawn(p.x, p.y, '#ff5b6a', 16, 200, 0.6);
+        break;
+      case 'haste':
+        p.hasteT = FIOLA.hasteTime;
+        this.particles.spawn(p.x, p.y, '#7adfff', 16, 240, 0.55);
+        break;
+      case 'rage':
+        // a bónuszt PONTOSAN a jelenlegi dmg-ből számítjuk, és így vonjuk vissza (Player.update)
+        if (p.rageBonus > 0) p.dmg -= p.rageBonus; // korábbi rage felülírása tisztán
+        p.rageBonus = p.dmg * (FIOLA.rageDmgMul - 1);
+        p.dmg += p.rageBonus;
+        p.rageT = FIOLA.rageTime;
+        this.particles.spawn(p.x, p.y, '#ff8a3a', 16, 240, 0.6);
+        break;
+      case 'confuse':
+        p.confusedT = FIOLA.confuseTime;
+        this.particles.spawn(p.x, p.y, '#c89adf', 16, 220, 0.55);
+        break;
+      case 'burn':
+        // önsorsoló tűz-DoT: a teljes időt felvesszük, a tick-eket az updateSelfBurn adja le
+        p.selfBurnT = FIOLA.burnTick * FIOLA.burnTicks;
+        p.selfBurnAcc = 0;
+        this.audio.burn();
+        this.particles.spawn(p.x, p.y, '#ff7b3a', 18, 200, 0.6);
+        break;
+      case 'slow':
+        p.slowT = FIOLA.slowTime;
+        p.slowMul = FIOLA.slowMul;
+        this.particles.spawn(p.x, p.y, '#8aa0c0', 16, 180, 0.5);
+        break;
+    }
+
+    // floater: felfedésnél a hatás neve, már ismertnél is (egyértelmű visszajelzés)
+    const col = def.good ? (firstReveal ? '#9ad88a' : '#cfe8c0') : '#e88a6a';
+    this.addFloater(p.x, p.y - 30, tr(def.nameKey), col);
+  }
+
+  /**
+   * Rossz adag-fiola (bad trip): önsorsoló tűz-DoT. Fix (raw) sebzés tickenként,
+   * az i-frame-et megkerüli (mint a talaj-veszély), és KILLHET - ez a kockázat a
+   * vegyes fiola-paletta tétje. A `updatePlay` hívja a játékos frissítése után.
+   */
+  private updateSelfBurn(dt: number): void {
+    const p = this.player;
+    if (p.selfBurnT <= 0 || !p.alive) return;
+    p.selfBurnT = Math.max(0, p.selfBurnT - dt);
+    p.selfBurnAcc += dt;
+    while (p.selfBurnAcc >= FIOLA.burnTick && p.alive) {
+      p.selfBurnAcc -= FIOLA.burnTick;
+      this.damagePlayer(FIOLA.burnDmg, 'burn', true, true); // raw + dot (nem skálázódik, megkerüli az i-frame-et)
+    }
+  }
+
+  /**
+   * Sorslap kijátszása (#46/#47, G-gomb): a következő (legrégebbi) lapot fogyasztja
+   * és az ISMERT hatását AZONNAL kiváltja. A kártyák a meglévő SKILL-könyvtárból
+   * merítenek (a skill `activate`-jét hívják), a 2 rúna (purge/ward) erős egyszeri
+   * effekt. Tisztán tranziens/egyszeri - a difficulty playerPower-t nem mozgatja.
+   */
+  private useCard(): void {
+    const p = this.player;
+    if (!p.alive || p.cards.length === 0) return;
+    const id: CardEffect = p.cards.shift()!;
+    const def = CARD_BY_ID[id];
+    this.audio.pickup();
+    switch (id) {
+      case 'nova':  SKILL_BY_ID['nova']!.activate(this); break;
+      case 'slow':  SKILL_BY_ID['slow']!.activate(this); break;
+      case 'heal':  SKILL_BY_ID['heal']!.activate(this); break;
+      case 'blink': SKILL_BY_ID['blink']!.activate(this); break;
+      case 'purge': this.purgeEnemies(); break;
+      case 'ward':
+        p.invuln = Math.max(p.invuln, CARD.wardTime);
+        this.particles.spawn(p.x, p.y, '#3df0ff', 22, 220, 0.6);
+        break;
+    }
+    this.addFloater(p.x, p.y - 30, tr(def.nameKey), def.col);
+  }
+
+  /**
+   * Pusztítás rúnája (szoba-törlő): a NEM-boss ellenfeleket azonnal megöli, a fix-
+   * statú bossnak `CARD.purgeBossDmg` fix sebzést visz be (anti-OP: nem trivializálja).
+   */
+  private purgeEnemies(): void {
+    this.addShake(16);
+    this.audio.boom();
+    this.particles.spawn(this.player.x, this.player.y, '#ff8a3a', 30, 400, 0.7);
+    this.particles.spawn(this.player.x, this.player.y, '#ffd36a', 16, 300, 0.6);
+    for (const e of [...this.currentRoom.enemies]) {
+      if (e.boss) {
+        e.hp -= CARD.purgeBossDmg;
+        this.addDamage(e.x, e.y - e.r, CARD.purgeBossDmg, { color: '#ff6a4a' });
+        if (e.hp <= 0) this.killEnemy(e);
+      } else {
+        this.addDamage(e.x, e.y - e.r, Math.max(0, e.hp), { color: '#ff6a4a' });
+        e.hp = 0;
+        this.killEnemy(e);
+      }
+    }
+  }
+
   private explode(b: Bomb): void {
     this.audio.boom();
     this.addShake(b.type === 'tnt' ? 18 : 11);
@@ -1838,6 +3293,35 @@ export class World {
     // a játékost is sebzi, ha a sugáron belül van (SAJÁT bomba → fix, nem skálázódik)
     if (this.player.alive && dist2(this.player.x, this.player.y, b.x, b.y) <= r2) {
       this.damagePlayer(HP.heart, 'hurt', true);
+    }
+    // titkos szoba (#37): fal melletti robbanás feltárhatja a rejtett szomszédot
+    if (!this.labyrinth) this.tryRevealSecret(b.x, b.y);
+  }
+
+  /**
+   * Titkos szoba feltárása fal melletti robbanáskor (#37): ha a robbanás elég közel
+   * van egy falhoz, és arra REJTETT titkos szomszéd van, feltárul (ajtó megnyílik,
+   * minimapon megjelenik). A rossz irányokat a `revealSecret` magától kiszűri.
+   */
+  private tryRevealSecret(bx: number, by: number): void {
+    const rc = this._room;
+    const D = SECRET.revealDist;
+    const checks: Array<[Dir, boolean]> = [
+      ['W', bx - rc.x < D],
+      ['E', rc.x + rc.w - bx < D],
+      ['N', by - rc.y < D],
+      ['S', rc.y + rc.h - by < D],
+    ];
+    for (const [dir, near] of checks) {
+      if (!near) continue;
+      if (this.dungeon.revealSecret(dir)) {
+        this.addShake(16);
+        this.particles.spawn(bx, by, '#ffe08a', 26, 320, 0.7);
+        this.particles.spawn(bx, by, '#cfa0ff', 14, 240, 0.6);
+        this.audio.door();
+        this.addFloater(this.cx, this.cy - 40, tr('fx.secretFound'), '#ffe08a');
+        return;
+      }
     }
   }
 
@@ -1921,6 +3405,12 @@ export class World {
 
   // ---- Frissítés ----
   update(dt: number): void {
+    // Seed-kapu modal (#49): a hub be van fagyasztva (a player nem mozog, az
+    // állomás nem trigger újra) - csak a hangulat-animáció él tovább.
+    if (this.seedGate) { this.particles.update(dt); this.fx.update(dt); return; }
+    if (this.stageSelect) { this.updateStageSelect(dt); return; } // HUB-mód szakasz-választó
+    if (this.charSelect) { this.updateCharacterSelect(dt); return; } // vándor-választó (#53)
+    if (this.chalSelect) { this.updateChallengeSelect(dt); return; } // kihívás-választó (#51)
     if (this.hub) { this.updateHub(dt); return; } // hub: harc nélküli mód-választó
     // Hit-stop: pár frame-re a teljes játékmenet áll (a kiváltó ütés „súlyt" kap).
     // VALÓS dt-vel csökken (nem a fagyasztott idővel), így mindig feloldódik.
@@ -1928,6 +3418,7 @@ export class World {
     this.computeRoom();
     this.collision.indexEnemies(); // ellenfél-térrács erre a frame-re (lövedék-broad-phase)
     this.runStats.tick(dt);
+    if (this.isSpecialRun) this.stageClock += dt; // a jelenlegi HUB-szakasz élő ideje
     if (this.slideP < 1) this.slideP = Math.min(1, this.slideP + dt / World.SLIDE_DUR);
     if (this.enemyFreezeT > 0) this.enemyFreezeT -= dt;
     if (this.bossIntro) { this.bossIntro.t -= dt; if (this.bossIntro.t <= 0) this.bossIntro = null; }
@@ -1942,6 +3433,7 @@ export class World {
     this.player.update(dt, this);
     this.updateBeam(dt); // Kénkő-sugár (#1): folyamatos sugár sebzése/rajz-állapota
     this.updateCone(dt); // Lángkúp (#4): folyamatos kúp-AoE sebzése + égő talaj
+    this.updateSelfBurn(dt); // Rossz adag-fiola (#44): önsorsoló tűz-DoT tickjei
     this.updateFamiliars(dt); // keringő orbok sebzése (Wave 4)
 
     // aktív skill (E) + robbanószer lerakás (T = TNT, B = bomba)
@@ -1949,6 +3441,8 @@ export class World {
     if (this.input.consumeSkill()) { if (!this.tryAltarAction()) this.useSkill(); }
     if (this.input.consumeTnt()) this.placeBomb('tnt');
     if (this.input.consumeBomb()) this.placeBomb('bomb');
+    if (this.input.consumeFiola()) this.drinkFiola();
+    if (this.input.consumeCard()) this.useCard();
 
     // bombák fuse + robbanás
     for (let i = this.bombs.length - 1; i >= 0; i--) {
@@ -2070,6 +3564,19 @@ export class World {
           this.audio.pickup();
           this.addFloater(pk.x, pk.y - 16, tr('fx.plusBomb'), '#cfcfd6');
           room.pickups.splice(i, 1);
+        } else if (pk.type === 'fiola') {
+          // a fiola a zsebbe kerül (a szín-index a hatást azonosítja - lásd drinkFiola)
+          this.player.fiolas.push(pk.fiolaColor);
+          this.audio.pickup();
+          this.addFloater(pk.x, pk.y - 16, tr('fx.plusFiola'), '#bcd0e8');
+          room.pickups.splice(i, 1);
+        } else if (pk.type === 'card') {
+          // a sorslap a (külön) zsebbe kerül; ISMERT hatású, a hatás-id-t tároljuk (lásd useCard)
+          this.player.cards.push(pk.cardId);
+          markCardSeen(pk.cardId); // Kódex feloldás-kapu (felvételkor, mert a hatás ismert)
+          this.audio.pickup();
+          this.addFloater(pk.x, pk.y - 16, tr('fx.plusCard'), CARD_BY_ID[pk.cardId].col);
+          room.pickups.splice(i, 1);
         } else {
           this.player.coins++;
           this.score += 25;
@@ -2086,6 +3593,10 @@ export class World {
     // szerencse-bolt: standok (vásárlás megerősítő ablakkal) + oltár animáció
     if (room.shop) this.updateShop(room.shop, dt);
 
+    // vér-oltár: állványok (vér-ajánlat ablakkal) + medence animáció
+    if (room.bloodAltar) this.updateBloodAltar(room.bloodAltar, dt);
+    if (room.curseAltar) this.updateCurseAltar(room.curseAltar, dt);
+
     // szoba kipucolva?
     if (!room.cleared && room.enemies.length === 0) {
       room.cleared = true;
@@ -2101,25 +3612,40 @@ export class World {
           this.firstBossVoicePlayed = true;
           this.audio.playVoice('sentex');
         }
-      } else if (Math.random() < roomDropChance() + this.player.luck * TUNING.luckRoomDrop) {
-        // szobánként legfeljebb egy pickup, az esély a dropConfig nettóiból (szerencse növeli)
-        this.dropPickup(this.cx, this.cy);
+      } else if (this.dungeonRun) {
+        // dungeon-mód köztes (nem-boss) szobája: csapóajtó a következő szobára
+        this.trapdoor = { x: this.cx, y: this.cy, bob: 0 };
+      } else {
+        // Kipucolás-drop: a szoba seedjéből KÜLÖN sózva → ölés-sorrendtől FÜGGETLEN,
+        // mert a roll EGYSZER fut (a szoba kiürülésekor). Ua. seed = ua. drop.
+        withRng(mulberry32(mix(this.roomSeed(room), 0xd309)), () => {
+          // szobánként legfeljebb egy pickup, az esély a dropConfig nettóiból (szerencse növeli)
+          if (random() < roomDropChance() + this.player.luck * TUNING.luckRoomDrop) {
+            this.dropPickup(this.cx, this.cy);
+          }
+        });
       }
     }
 
     // ajtó-rács animáció: kipucolt szobánál felhúzódik, egyébként zárva marad
     this.doorT += ((room.cleared ? 1 : 0) - this.doorT) * Math.min(1, dt * 9);
 
-    // csapóajtó a következő szintre
+    // csapóajtó a következő szintre (boss-rohamban: a következő bossra / győzelemre)
     if (this.trapdoor) {
       this.trapdoor.bob += dt * 3;
       if (dist2(this.trapdoor.x, this.trapdoor.y, this.player.x, this.player.y) < (this.player.r + 16) ** 2) {
-        // szint-teljesítés bónusz: mélységgel skálázva (mélyebb = több)
-        this.score += 100 * this.floor;
-        // szint-tisztítási idő-rekord (a SZÁM stabil → versenyezhető), majd számláló
-        recordFloorClear(this.floor, this.runStats.floor);
-        this.runStats.floorsCleared++;
-        this.nextFloor();
+        if (this.bossRush) {
+          this.advanceBossRush();
+        } else if (this.dungeonRun) {
+          this.advanceDungeon();
+        } else {
+          // szint-teljesítés bónusz: mélységgel skálázva (mélyebb = több)
+          this.score += 100 * this.floor;
+          // szint-tisztítási idő-rekord (a SZÁM stabil → versenyezhető), majd számláló
+          recordFloorClear(this.floor, this.runStats.floor);
+          this.runStats.floorsCleared++;
+          this.nextFloor();
+        }
       }
     }
 
@@ -2149,31 +3675,36 @@ export class World {
       const ey = (this.labyrinth.exit.row + 0.5) * TILE;
       if (!this.labWon && dist2(this.player.x, this.player.y, ex, ey) < (TILE * 0.55) ** 2) {
         this.labWon = true;
-        this.score += 100 * this.floor; // teljesítés-bónusz (mint a csapóajtónál)
-        // labirintus-idő rekord (fejezetenként stabil → versenyezhető), majd számláló
-        recordLabClear(this.labChapterId, this.runStats.lab);
-        this.runStats.labsCleared++;
-        this.audio.door();
-        // JUTALOM a kockázatért (időlimit + ellenfelek): garantált tárgy + érme.
-        // A tárgy/érme a karakteren marad (a kapun át indított labirintusban).
-        const reward = rollItem();
-        this.giveItem(reward);
-        const coins = 8 + this.floor * 2;
-        this.player.coins += coins;
-        this.score += coins * 25;
-        this.particles.spawn(this.player.x, this.player.y, '#ffd36a', 22, 220, 0.8);
-        // megálló jutalom-kártya: a játékos rendesen lássa, mit kapott; a kilépést
-        // a RENDBEN gomb (vagy ESC) váltja ki (lásd acceptOffer/declineOffer).
-        this.pendingLabExit = true;
-        this.callbacks.onOffer({
-          badge: tr('lab.reward.badge'),
-          title: itemName(reward),
-          desc: itemDesc(reward),
-          sub: tr('lab.reward.sub', { coins }),
-          color: reward.col,
-          acceptLabel: tr('offer.ok'),
-          hideDecline: true,
-        });
+        if (this.labGauntlet) {
+          // 15-pályás gauntlet: tovább a következő pályára / győzelem (saját ág)
+          this.advanceLabGauntlet();
+        } else {
+          this.score += 100 * this.floor; // teljesítés-bónusz (mint a csapóajtónál)
+          // labirintus-idő rekord (fejezetenként stabil → versenyezhető), majd számláló
+          recordLabClear(this.labChapterId, this.runStats.lab);
+          this.runStats.labsCleared++;
+          this.audio.door();
+          // JUTALOM a kockázatért (időlimit + ellenfelek): garantált tárgy + érme.
+          // A tárgy/érme a karakteren marad (a kapun át indított labirintusban).
+          const reward = rollItem();
+          this.giveItem(reward);
+          const coins = 8 + this.floor * 2;
+          this.player.coins += coins;
+          this.score += coins * 25;
+          this.particles.spawn(this.player.x, this.player.y, '#ffd36a', 22, 220, 0.8);
+          // megálló jutalom-kártya: a játékos rendesen lássa, mit kapott; a kilépést
+          // a RENDBEN gomb (vagy ESC) váltja ki (lásd acceptOffer/declineOffer).
+          this.pendingLabExit = true;
+          this.callbacks.onOffer({
+            badge: tr('lab.reward.badge'),
+            title: itemName(reward),
+            desc: itemDesc(reward),
+            sub: tr('lab.reward.sub', { coins }),
+            color: reward.col,
+            acceptLabel: tr('offer.ok'),
+            hideDecline: true,
+          });
+        }
       } else if (!this.labWon && this.player.alive && (this.labTimeLeft -= dt) <= 0) {
         // lejárt a visszaszámláló: a futás véget ér (mintha elesett volna)
         this.labTimeLeft = 0;
@@ -2211,7 +3742,12 @@ export class World {
         if (this.hubArmed) {
           this.hubArmed = false;
           if (p.locked) {
-            this.addFloater(c.x, c.y - 38, tr('fx.comingSoon'), '#cdbb9a');
+            // a boss/dungeon portál a feloldás-feltételt mutatja (#52)
+            const msg =
+              p.id === 'boss' ? tr('fx.bossLocked', { n: BOSS_RUSH.unlockFloor })
+              : p.id === 'dungeon' ? tr('fx.dungeonLocked', { n: DUNGEON_RUN.unlockFloor })
+              : tr('fx.comingSoon');
+            this.addFloater(c.x, c.y - 38, msg, '#cdbb9a');
             this.audio.denied();
           } else {
             this.audio.stairs();
@@ -2221,7 +3757,50 @@ export class World {
         break;
       }
     }
-    if (!near) this.hubArmed = true; // lelépett minden portálról → újra élesedik
+    // meta-állomások (Ú3): rálépve a Game nyitja a kódex/rang nézetet
+    if (!near) {
+      for (const s of this.hubStations) {
+        const c = this.cellCenter(s.col, s.row);
+        if (dist2(c.x, c.y, this.player.x, this.player.y) < (this.player.r + 24) ** 2) {
+          near = true;
+          if (this.hubArmed) {
+            this.hubArmed = false;
+            this.audio.stairs();
+            this.onHubStation?.(s.id);
+          }
+          break;
+        }
+      }
+    }
+    // Vándor-szobor (#53): rálépve a karakterválasztó nyílik (a hubon belül)
+    if (!near && this.hubCharStation) {
+      const c = this.cellCenter(this.hubCharStation.col, this.hubCharStation.row);
+      if (dist2(c.x, c.y, this.player.x, this.player.y) < (this.player.r + 24) ** 2) {
+        near = true;
+        if (this.hubArmed) { this.hubArmed = false; this.openCharacterSelect(); }
+      }
+    }
+    // Kihívás-obeliszk (#51): rálépve a kihívás-választó nyílik
+    if (!near && this.hubChalStation) {
+      const c = this.cellCenter(this.hubChalStation.col, this.hubChalStation.row);
+      if (dist2(c.x, c.y, this.player.x, this.player.y) < (this.player.r + 24) ** 2) {
+        near = true;
+        if (this.hubArmed) { this.hubArmed = false; this.openChallengeSelect(); }
+      }
+    }
+    // Krónikás NPC: rálépve egy forgó hangulat-sort vet fel (nincs overlay)
+    if (!near && this.hubNpc) {
+      const c = this.cellCenter(this.hubNpc.col, this.hubNpc.row);
+      if (dist2(c.x, c.y, this.player.x, this.player.y) < (this.player.r + 26) ** 2) {
+        near = true;
+        if (this.hubArmed) {
+          this.hubArmed = false;
+          this.addFloater(c.x, c.y - 40, tr(`hub.npc.${this.hubNpcLine}`), '#e8d8b0');
+          this.hubNpcLine = (this.hubNpcLine + 1) % 3;
+        }
+      }
+    }
+    if (!near) this.hubArmed = true; // lelépett minden portálról/állomásról → újra élesedik
   }
 
   private computeRoom(): void {
@@ -2295,6 +3874,9 @@ export class World {
 
   // ---- Kirajzolás ----
   render(ctx: CanvasRenderingContext2D): void {
+    if (this.stageSelect) { this.renderStageSelect(ctx); return; }
+    if (this.charSelect) { this.renderCharacterSelect(ctx); return; }
+    if (this.chalSelect) { this.renderChallengeSelect(ctx); return; }
     if (this.hub) { this.renderHub(ctx); return; }
     if (this.labyrinth) { this.renderLabyrinth(ctx); return; }
 
@@ -2326,6 +3908,8 @@ export class World {
     const room = this.currentRoom;
     for (const pk of room.pickups) pk.draw(ctx);
     if (room.shop) room.shop.draw(ctx);
+    if (room.bloodAltar) room.bloodAltar.draw(ctx);
+    if (room.curseAltar) room.curseAltar.draw(ctx);
     if (room.pedestal && !room.pedestal.taken) room.pedestal.draw(ctx);
     if (room.gate) this.drawGate(ctx, room.gate);
     if (room.dungeonGate) this.drawDungeonGate(ctx, room.dungeonGate);
@@ -2421,6 +4005,35 @@ export class World {
     for (const p of this.hub!) {
       const c = this.cellCenter(p.col, p.row);
       drawHubPortal(ctx, c.x, c.y, th.accent, p.id, p.locked, t);
+    }
+
+    // hangulat-parázstartó a jobb alsó sarokban (a Krónikás párja, csak dísz)
+    const brz = this.cellCenter(10.8, 5);
+    drawHubBrazier(ctx, brz.x, brz.y, t);
+
+    // meta-állomások (Ú3) - a közelség kiemeli a feliratot
+    for (const s of this.hubStations) {
+      const c = this.cellCenter(s.col, s.row);
+      const near = dist2(c.x, c.y, this.player.x, this.player.y) < (this.player.r + 24) ** 2;
+      drawHubStation(ctx, c.x, c.y, th.accent, s.id, near, t);
+    }
+    // Krónikás NPC
+    if (this.hubNpc) {
+      const c = this.cellCenter(this.hubNpc.col, this.hubNpc.row);
+      drawHubNpc(ctx, c.x, c.y, t);
+    }
+    // Vándor-szobor (#53) - a jelenleg választott vándor accentjével
+    if (this.hubCharStation) {
+      const c = this.cellCenter(this.hubCharStation.col, this.hubCharStation.row);
+      const sel = CHARACTER_BY_ID[loadCharacterId()] ?? CHARACTERS[0]!;
+      const near = dist2(c.x, c.y, this.player.x, this.player.y) < (this.player.r + 24) ** 2;
+      drawHubCharStatue(ctx, c.x, c.y, sel.accent, tr('char.station'), near, t);
+    }
+    // Kihívás-obeliszk (#51)
+    if (this.hubChalStation) {
+      const c = this.cellCenter(this.hubChalStation.col, this.hubChalStation.row);
+      const near = dist2(c.x, c.y, this.player.x, this.player.y) < (this.player.r + 24) ** 2;
+      drawHubChalObelisk(ctx, c.x, c.y, '#d86a6a', tr('challenge.station'), near, t);
     }
 
     if (this.player.alive) this.player.draw(ctx);
@@ -2649,6 +4262,24 @@ export class World {
       // szél-árnyalat (memoizált gradiens - szobánként állandó)
       ctx.fillStyle = vignetteGradient(ctx, this.cx, this.cy, rc, th.vignette);
       ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+
+      // VÉR-OLTÁR szoba: vörös, baljós tónus a kőpadló fölött (a hangulat miatt)
+      if (this.currentRoom.type === 'blood') {
+        const bg = ctx.createRadialGradient(this.cx, this.cy, 40, this.cx, this.cy, Math.max(rc.w, rc.h) * 0.62);
+        bg.addColorStop(0, 'rgba(120,12,20,0.10)');
+        bg.addColorStop(1, 'rgba(60,4,10,0.46)');
+        ctx.fillStyle = bg;
+        ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+      }
+
+      // ÁTOKVEREM szoba: hideg lila/beteges tónus (megkülönbözteti a vér vöröstől)
+      if (this.currentRoom.type === 'curse') {
+        const bg = ctx.createRadialGradient(this.cx, this.cy, 40, this.cx, this.cy, Math.max(rc.w, rc.h) * 0.62);
+        bg.addColorStop(0, 'rgba(80,30,130,0.10)');
+        bg.addColorStop(1, 'rgba(34,10,58,0.48)');
+        ctx.fillStyle = bg;
+        ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+      }
     }
 
     drawWalls(ctx, rc, th);

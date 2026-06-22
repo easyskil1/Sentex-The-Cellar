@@ -16,19 +16,24 @@
 
 import { TUNING } from './tuning';
 import { itemPower } from './itemPower';
+import { setBonusPower } from '../content/itemSets';
 import { chapterDifficultyMul } from '../level/levels';
 
 /** A minimum, amit egy játékostól tudnunk kell az erő-számításhoz. */
 export interface PowerSource {
   collected: ReadonlyArray<{ name: string }>;
+  /** A választott vándor (#53) kezdő-erő-pontja (sidegrade → kicsi); opcionális. */
+  startPower?: number;
 }
 
-/** A felvett itemek erő-pontjainak összege (additív build-erő). */
+/** A felvett itemek erő-pontjainak összege + az aktív szett-bónuszok ereje +
+ *  a vándor kezdő-ereje (additív build-erő). A szett-erő is benne van, hogy a
+ *  nehézség lássa azt is; a vándor-start sem „ingyen" erő. */
 export function playerPower(p: PowerSource | null | undefined): number {
   if (!p) return 0;
   let sum = 0;
   for (const it of p.collected) sum += itemPower(it.name);
-  return sum;
+  return sum + setBonusPower(p.collected) + (p.startPower ?? 0);
 }
 
 export interface EnemyScale {

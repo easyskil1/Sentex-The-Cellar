@@ -1,13 +1,26 @@
 import { TAU, rand } from '../../engine/math';
+import { drawFiola, FIOLA_COLORS } from '../content/Fiola';
+import { drawCard, CARD_BY_ID, type CardEffect } from '../content/Card';
 
-export type PickupType = 'heart' | 'coin' | 'tnt' | 'bomb';
+export type PickupType = 'heart' | 'coin' | 'tnt' | 'bomb' | 'fiola' | 'card';
 
-/** Felvehető tárgy a padlón (szív, érme vagy bomba). A felvételt a World kezeli. */
+/** Felvehető tárgy a padlón (szív, érme, bomba, fiola vagy sorslap). A felvételt a World kezeli. */
 export class Pickup {
   bob = rand(0, TAU);
   dead = false;
 
-  constructor(public x: number, public y: number, public readonly type: PickupType) {}
+  /**
+   * Fiola-pickupnál a szín-index (FIOLA_COLORS): ez azonosítja a futáson belüli
+   * hatást (lásd Player.fiolaMap). Sorslap-pickupnál a `cardId` adja a hatást.
+   * A többi típusnál nincs jelentőségük.
+   */
+  constructor(
+    public x: number,
+    public y: number,
+    public readonly type: PickupType,
+    public readonly fiolaColor = 0,
+    public readonly cardId: CardEffect = 'nova',
+  ) {}
 
   update(dt: number): void {
     this.bob += dt * 4;
@@ -20,6 +33,10 @@ export class Pickup {
       drawHeart(ctx, 0, 0, 9, '#ff5b6a', '#a02838');
     } else if (this.type === 'tnt' || this.type === 'bomb') {
       drawBombIcon(ctx, 0, 0, 9, this.type);
+    } else if (this.type === 'fiola') {
+      drawFiola(ctx, 0, 0, 9, FIOLA_COLORS[this.fiolaColor] ?? FIOLA_COLORS[0]!, { glow: true });
+    } else if (this.type === 'card') {
+      drawCard(ctx, 0, 0, 8, CARD_BY_ID[this.cardId], { glow: true });
     } else {
       drawCoinIcon(ctx, 0, 0, 8);
     }

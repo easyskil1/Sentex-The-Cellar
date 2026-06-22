@@ -20,9 +20,11 @@ export function drawTick(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
-  // 8 rövid láb a fej környékén (4 oldalanként)
+  // 8 rövid láb a fej környékén (4 oldalanként) - EGY közös path-ban (1 stroke-hívás
+  // 8 helyett; vizuálisan azonos, mert minden láb azonos stílusú). Forró úton fut.
   ctx.strokeStyle = dark;
   ctx.lineWidth = Math.max(1, r * 0.12);
+  ctx.beginPath();
   for (const sgn of [-1, 1]) {
     for (let i = 0; i < 4; i++) {
       const bx = r * (0.55 - i * 0.16);
@@ -30,12 +32,11 @@ export function drawTick(ctx: CanvasRenderingContext2D, v: EnemyVisual): void {
       const bob = Math.sin(v.wob * 6 + i + (sgn > 0 ? 0 : 0.5)) * r * 0.08;
       const fx = bx + r * (0.2 - i * 0.04);
       const fy = sgn * r * 0.95 + bob;
-      ctx.beginPath();
       ctx.moveTo(bx, by);
       ctx.quadraticCurveTo((bx + fx) / 2, by + sgn * r * 0.35, fx, fy);
-      ctx.stroke();
     }
   }
+  ctx.stroke();
 
   // teleszívott potroh (tojás, hátrafelé nagyobb)
   const g = radial3(ctx, -r * 0.2, -r * 0.25, r * 0.15, -r * 0.3, 0, r * 1.1, 0.6, light, body, darken(v.col, 0.32));

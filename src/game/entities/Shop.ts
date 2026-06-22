@@ -1,9 +1,10 @@
 import { TAU, rand, pick, shade } from '../../engine/math';
 import type { Item } from '../content/items';
-import { pillLook, rollItem, itemName, itemDesc } from '../content/items';
+import { rollItem, itemName, itemDesc } from '../content/items';
 import { tc } from '../../i18n';
-import { drawPill } from '../content/Pill';
+import { drawItemIcon } from '../content/itemIcon';
 import { drawBombIcon, drawHeart } from './Pickup';
+import { softGlow } from '../render/glow';
 import { itemPrice, consumablePrice, rerollPrice, GAMBLE_COST, type ConsumableKind } from '../content/shopPricing';
 
 /** Egy standon árult portéka: vagy egy tárgy, vagy egy fogyóeszköz. */
@@ -240,15 +241,10 @@ export class Shop {
     const orbCol = spinning ? `hsl(${hue},92%,62%)` : '#ffd86a';
     const glowCol = this.flash > 0 ? '#fff1b0' : orbCol;
 
-    // dicsfény
+    // dicsfény - cache-elt lágy fénykoszorú (a shadowBlur kiváltása, lásd render/glow)
     ctx.save();
-    ctx.shadowColor = glowCol;
-    ctx.shadowBlur = 26 + pulse * 18 + this.flash * 30;
-    ctx.fillStyle = glowCol;
-    ctx.globalAlpha = 0.22 + this.flash * 0.5;
-    ctx.beginPath();
-    ctx.arc(x, oy, 26 + pulse * 4, 0, TAU);
-    ctx.fill();
+    ctx.globalAlpha = 0.5 + this.flash * 0.45;
+    softGlow(ctx, x, oy, 46 + pulse * 12 + this.flash * 22, glowCol);
     ctx.restore();
 
     // arany foglalat
@@ -305,8 +301,7 @@ export class Shop {
     // lebegő rúna-korong
     const ry2 = y - 6 + Math.sin(this.t * 2) * 2;
     ctx.save();
-    ctx.shadowColor = '#7fe0c4';
-    ctx.shadowBlur = 12 + pulse * 10;
+    softGlow(ctx, x, ry2, 24 + pulse * 8, '#7fe0c4'); // cache-elt fénykoszorú a shadowBlur helyett
     ctx.strokeStyle = '#7fe0c4';
     ctx.lineWidth = 2.4;
     ctx.beginPath();
@@ -375,12 +370,11 @@ export class Shop {
     ctx.restore();
 
     if (s.offer.kind === 'item') {
-      drawPill(ctx, x, y + yo, 13, pillLook(s.offer.item), { glow: true, rot: Math.sin(s.bob) * 0.16 });
+      drawItemIcon(ctx, x, y + yo, 13, s.offer.item, { glow: true, rot: Math.sin(s.bob) * 0.16 });
     } else {
       ctx.save();
       ctx.translate(x, y + yo);
-      ctx.shadowColor = view.color;
-      ctx.shadowBlur = 12;
+      softGlow(ctx, 0, 0, 20, view.color); // cache-elt fénykoszorú a shadowBlur helyett
       if (s.offer.cons === 'heart') drawHeart(ctx, 0, 0, 13, '#ff5b6a', '#a02838');
       else drawBombIcon(ctx, 0, 0, 12, s.offer.cons === 'tnt' ? 'tnt' : 'bomb');
       ctx.restore();

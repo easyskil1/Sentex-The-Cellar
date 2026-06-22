@@ -268,12 +268,14 @@ export interface FinishOutcome {
   place: number; // ranglista-helyezés (0 = nem fért be)
 }
 
-export function finishRun(name: string, score: number, floor: number, time = 0): FinishOutcome {
+export function finishRun(name: string, score: number, floor: number, time = 0, countBestFloor = true): FinishOutcome {
   const progress = loadProgress();
   const prevRank = progress.rank;
   progress.totalScore += Math.max(0, Math.round(score));
   progress.rank = rankForScore(progress.totalScore);
-  if (floor > progress.bestFloor) progress.bestFloor = floor;
+  // a boss-roham (countBestFloor=false) NEM mozgatja a kampány „legmélyebb szint"
+  // rekordot (különben önmagát oldaná fel / hígítaná a feloldás-kaput)
+  if (countBestFloor && floor > progress.bestFloor) progress.bestFloor = floor;
   saveProgress(progress);
   const { place } = recordRun({ name, score, floor, rank: progress.rank, date: Date.now(), time });
   return { progress, prevRank, rankedUp: progress.rank > prevRank, place };

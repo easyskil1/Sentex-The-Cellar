@@ -111,6 +111,10 @@ export interface TimeRecords {
   floorClear: Record<number, number>;
   /** fejezet-id → leggyorsabb labirintus (mp). */
   labClear: Record<string, number>;
+  /** HUB kihívás-mód szakasz-rekordok: `"<mode>:<index>"` → leggyorsabb (mp).
+   *  A `mode` = boss|dungeon|labyrinth, az `index` 0-alapú szakasz-sorszám.
+   *  A szakasz-választó ezt írja a csomópontok alá (lásd stageSelectRender). */
+  stageClear: Record<string, number>;
   /** leghosszabb túlélés egy futásban (mp). */
   longestRun: number;
   /** legjobb egy-futás pont. */
@@ -142,11 +146,12 @@ function saveStats(s: LifetimeStats): void {
 
 export function loadRecords(): TimeRecords {
   const r = readJSON<TimeRecords>(RECORDS_KEY, {
-    floorClear: {}, labClear: {}, longestRun: 0, bestScore: 0,
+    floorClear: {}, labClear: {}, stageClear: {}, longestRun: 0, bestScore: 0,
   });
   // a beágyazott objektumok a spread után referenciák lehetnek → biztosítsuk őket
   if (!r.floorClear || typeof r.floorClear !== 'object') r.floorClear = {};
   if (!r.labClear || typeof r.labClear !== 'object') r.labClear = {};
+  if (!r.stageClear || typeof r.stageClear !== 'object') r.stageClear = {};
   return r;
 }
 
@@ -178,6 +183,30 @@ export function recordLabClear(chapterId: string, seconds: number): boolean {
     return true;
   }
   return false;
+}
+
+/** HUB kihívás-mód (boss/dungeon/labyrinth) egy szakaszának kulcsa. */
+export function stageKey(mode: string, index: number): string {
+  return `${mode}:${index}`;
+}
+
+/** Szakasz-tisztítási idő rögzítése, ha új csúcs (gyorsabb). Igaz = új rekord. */
+export function recordStageClear(mode: string, index: number, seconds: number): boolean {
+  if (!Number.isFinite(seconds) || seconds <= 0) return false;
+  const r = loadRecords();
+  const key = stageKey(mode, index);
+  const prev = r.stageClear[key];
+  if (prev === undefined || seconds < prev) {
+    r.stageClear[key] = seconds;
+    saveRecords(r);
+    return true;
+  }
+  return false;
+}
+
+/** A HUB-mód szakasz-rekordok (a szakasz-választó olvassa nyitáskor). */
+export function loadStageTimes(): Record<string, number> {
+  return loadRecords().stageClear;
 }
 
 /** Egy lezárt futás összesítése: élethosszig statok + csúcs-rekordok frissítése. */

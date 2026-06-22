@@ -14,6 +14,7 @@ const KEY = 'sentex_bestiary';
 const BOSS_KEY = 'sentex_bestiary_boss';
 const PERK_KEY = 'sentex_codex_perks';
 const SKILL_KEY = 'sentex_codex_skills';
+const SETS_KEY = 'sentex_codex_sets';
 
 /** Magyar megjelenítendő nevek a katakomba-fal bejegyzéseihez (gótikus téma). */
 export const ENEMY_NAMES: Record<EnemyKind, string> = {
@@ -63,6 +64,7 @@ export function resetBestiary(): void {
     localStorage.removeItem(BOSS_KEY);
     localStorage.removeItem(PERK_KEY);
     localStorage.removeItem(SKILL_KEY);
+    localStorage.removeItem(SETS_KEY);
   } catch { /* nem elérhető */ }
 }
 
@@ -101,6 +103,20 @@ export function loadSkillsSeen(): Set<string> { return loadSet(SKILL_KEY); }
 
 /** Egy skill feloldása (felszereléskor vagy induló skillként). */
 export function unlockSkill(id: string): void { addToSet(SKILL_KEY, id); }
+
+// ──────────────────────────────────────────────────────────────────────
+//  Szettek („Rendek") - a Kódex RENDEK füléhez
+// ──────────────────────────────────────────────────────────────────────
+//
+// Egy szett-tier (küszöb-bónusz) akkor oldódik fel, amikor a játékos ELŐSZÖR
+// AKTIVÁLJA (a World.applySetTiers hívja). A kulcs `setId:need` (pl. „war:2"),
+// így a Kódexben a hatás csak aktiválás után tárul fel (a tagság a perk-feloldástól).
+
+/** A felfedezett (aktivált) szett-tierek kulcsai (`setId:need`). */
+export function loadSetTiersSeen(): Set<string> { return loadSet(SETS_KEY); }
+
+/** Egy szett-tier feloldása az ELSŐ aktiváláskor (`setId:need` kulcs). */
+export function unlockSetTier(id: string, need: number): void { addToSet(SETS_KEY, `${id}:${need}`); }
 
 // ──────────────────────────────────────────────────────────────────────
 //  Bossok - külön kulcs (a fő ellenfél-fal alatt, saját szekcióban)

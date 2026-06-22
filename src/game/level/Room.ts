@@ -2,10 +2,12 @@ import type { IEnemy } from '../entities/enemies/Enemy';
 import type { Pickup } from '../entities/Pickup';
 import type { Pedestal } from '../entities/Pedestal';
 import type { Shop } from '../entities/Shop';
+import type { BloodAltar } from '../entities/BloodAltar';
+import type { CurseAltar } from '../entities/CurseAltar';
 import type { Decoration, Obstacle, Splat } from '../types';
 import type { MapAnimDraw } from './mapAnim';
 
-export type RoomType = 'start' | 'normal' | 'boss' | 'item';
+export type RoomType = 'start' | 'normal' | 'boss' | 'item' | 'blood' | 'curse' | 'secret';
 
 /** Egy dungeon-szoba: rácspozíció, típus, állapot és tartalom. */
 export class Room {
@@ -13,12 +15,21 @@ export class Room {
   visited: boolean;
   /** Igaz, ha az ellenfeleket már legeneráltuk (visszatéréskor nem ismételjük). */
   spawned: boolean;
+  /**
+   * Titkos szoba (#37) felfedezett-e: amíg hamis, NINCS hozzá nyitott ajtó és a
+   * minimapon sem látszik (bombázással tárul fel). Minden más szobánál mindig igaz.
+   */
+  discovered: boolean;
 
   enemies: IEnemy[] = [];
   pickups: Pickup[] = [];
   pedestal: Pedestal | null = null;
   /** Szerencse-szoba berendezése (csak `item` típusú szobákban). */
   shop: Shop | null = null;
+  /** Vér-oltár berendezése (csak `blood` típusú szobákban). */
+  bloodAltar: BloodAltar | null = null;
+  /** Átok-reliquárium berendezése (csak `curse` típusú szobákban). */
+  curseAltar: CurseAltar | null = null;
   /** Pálya-tárgyak (kő/fa/láda/víz) rács-cellákon — a sablonból. */
   obstacles: Obstacle[] = [];
   decorations: Decoration[] = [];
@@ -35,6 +46,7 @@ export class Room {
     this.cleared = isSafe;
     this.visited = isSafe;
     this.spawned = isSafe;
+    this.discovered = type !== 'secret'; // a titkos szoba bombázásig rejtett
   }
 
   get key(): string {

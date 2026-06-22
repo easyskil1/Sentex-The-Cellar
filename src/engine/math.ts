@@ -2,7 +2,32 @@
 
 export const TAU = Math.PI * 2;
 
-export const rand = (a: number, b: number): number => a + Math.random() * (b - a);
+/**
+ * Lecserélhető véletlen-FORRÁS (seed-rendszer, #49). Alapból `Math.random`, így a
+ * játék futásideje (harc, AI, részecske, hang) változatlanul ÉLŐ marad. Generáláskor
+ * a `World` egy seedelt függvényre cseréli a `withRng` scope idejére, majd VISSZAÁLL -
+ * így minden `rand`/`randi`/`pick`/`weightedPick` hívás a generálás alatt
+ * determinisztikus (ugyanaz a seed = ugyanaz a pálya), a hívási helyek érintése nélkül.
+ */
+let _src: () => number = Math.random;
+
+/** A pillanatnyi forrás egy mintája (0..1). A seed-scope-on át determinisztikus. */
+export const random = (): number => _src();
+
+/** A forrás cseréje (null = vissza `Math.random`-ra). Lásd `withRng`. */
+export const setRng = (fn: (() => number) | null): void => { _src = fn ?? Math.random; };
+
+/**
+ * A `body`-t a megadott seedelt forrással futtatja, majd VISSZAÁLLÍTJA az előzőt
+ * (akkor is, ha hiba dobódik). Beágyazható. Szinkron blokkokhoz (generálás).
+ */
+export function withRng<T>(fn: () => number, body: () => T): T {
+  const prev = _src;
+  _src = fn;
+  try { return body(); } finally { _src = prev; }
+}
+
+export const rand = (a: number, b: number): number => a + random() * (b - a);
 
 export const randi = (a: number, b: number): number => Math.floor(rand(a, b + 1));
 
@@ -26,7 +51,7 @@ export const weightedPick = <T>(arr: readonly T[], weight: (item: T) => number):
   let total = 0;
   for (const it of arr) total += Math.max(0, weight(it));
   if (total <= 0) return pick(arr);
-  let r = Math.random() * total;
+  let r = random() * total;
   for (const it of arr) {
     r -= Math.max(0, weight(it));
     if (r < 0) return it;

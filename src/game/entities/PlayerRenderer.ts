@@ -1,16 +1,11 @@
-import { TAU, shade } from '../../engine/math';
+import { TAU } from '../../engine/math';
 
 /**
  * A játékos kinézetének önálló renderelője — leválasztva a Player logikájáról.
  *
- * Réteges/forma-alapú jelmez-rendszer: a `cosmetics` lista
- * dönti el, mit rajzolunk. Alapból a barátságos, fehér ruhás akolitus; bizonyos
- * tárgyak más formát/réteget kapcsolnak be (pl. 'wraith' → sötét csuklyás).
- *
- * A felvett tárgyak (tabletták) ezen felül **mutálják** a megjelenést a
- * `BodyLook`-on keresztül: a szín-mezők felülírják az alapot (a legutóbb felvett
- * nyer), a számláló-mezők (szarv, tüske, plusz szem…) pedig **halmozódnak**,
- * így több tabletta látványosan egymásra épül a karakteren.
+ * Forma-alapú: alapból „Nim" (csuklyás, egyszemű); a `cosmetics` lista
+ * kapcsolhat be más formát (pl. 'wraith' → sötét csuklyás). A felvett tárgyak
+ * csak a LÖVEDÉK kinézetét állítják (`BodyLook`), a karakter testét nem.
  */
 export interface PlayerVisual {
   x: number;
@@ -22,864 +17,34 @@ export interface PlayerVisual {
   lean: number;
   invuln: number;
   moving: boolean;
+  /** A mozgás-vektor (sebesség); a karakter szeme efelé néz, ha mozog. */
+  moveX?: number;
+  moveY?: number;
   /** Aktív jelmez-rétegek/formák (tárgyak adják hozzá). */
   cosmetics?: string[];
-  /** A felvett tárgyak halmozott kinézet-módosítása. */
+  /** A felvett tárgyak lövedék-kinézet módosítása. */
   look?: BodyLook;
 }
 
 /**
- * A karakter mutálható kinézete. A szín-mezők hiányában az alap-paletta marad;
- * a számlálók a felvett tárgyak során összeadódnak (lásd `Player.refreshLook`).
+ * A felvett tárgyak hatása a LÖVEDÉKRE (a karakter testét nem érinti).
+ * A mezők hiányában az alap lövedék (kék kör) marad; a legutóbb felvett nyer.
  */
 export interface BodyLook {
-  /** Bőrszín (hex). */
-  skin?: string;
-  /** Hajszín (hex). */
-  hair?: string;
-  /** Szemszín (hex) — felülírja az alap zöld íriszt (a világosabb ragyogás ebből számít). */
-  eye?: string;
   /** Lövedék-szín (hex) — a könnycsepp színe; ha nincs, az alap kék marad. */
   tearColor?: string;
   /** Lövedék függőleges összenyomása (1 = kör; <1 = lapított korong, pl. Lendkerék). */
   tearSquashY?: number;
-  /** Lábacskák színe (hex) — felülírja az alap bundát a lábakon (pl. Pók-láb → zöld). */
-  legColor?: string;
-  /** Mancsok/kezek színe (hex) — felülírja az alap bundát a karokon (pl. Záporkő → kék). */
-  handColor?: string;
-  /** Szemüveg: kerek, arany keretes pápaszem a szemek köré (pl. Messzelátó). */
-  glasses?: boolean;
-  /** Fej-dudorok színe (hex); ha nincs, a világos bunda. */
-  bumpColor?: string;
-  /** Piros, lüktető szív a mellkason/pocakon (pl. Vér-szív). */
-  chestHeart?: boolean;
-  /** Szerencse-patkó a jobb mancsban (pl. Patkó). */
-  horseshoe?: boolean;
-  /** Az egyik szem terminátoros, izzó vörös robot-távcső (pl. Lámpás). */
-  scopeEye?: boolean;
-  /** Enyhén áttetsző, sötét fátyol a fejre borítva (pl. Sötét fátyol). */
-  veil?: boolean;
-  /** A fej JOBB felét beborító festés színe (hex), pl. Harci jel → sötétzöld. */
-  halfHeadColor?: string;
-  /** A fej BAL felét beborító festés színe (hex), pl. Hármas könny → kék. */
-  halfHeadColorLeft?: string;
-  /** Kis szárnyak színe a lábakon (hex) — szárnyas saru (pl. Szárnyas saru → zöld). */
-  footWingColor?: string;
-  /** Három fülbevaló egy sorban a jobb fülön (pl. Sörét-szem). */
-  earrings?: boolean;
-  /** Punk taréj (mohawk) a fej tetején (pl. Tűhegy). */
-  punkHair?: boolean;
-  /** Rugós, gombvégű antenna a fejen (pl. Gumifal). */
-  springAntenna?: boolean;
-  /** Célkereszt-jel a homlokon (pl. Vadász-szem). */
-  foreheadCrosshair?: boolean;
-  /** Könnycsepp-medálos fülbevaló a jobb fülön (pl. Szellem-könny). */
-  teardropEarring?: boolean;
-  /** A bal fül feketére festve (pl. Repesz-csepp). */
-  leftEarBlack?: boolean;
-  /** Nagy piros bokszkesztyűk a mancsokon (pl. Lökő-könny). */
-  boxingGloves?: boolean;
-  /** Hold-sarló jel a homlokon (pl. Holdkő). */
-  crescentMark?: boolean;
-  /** Lebegő arany „mindent látó" szem a karakter fölött (csak dísz, pl. Villám-szem). */
-  floatingEye?: boolean;
-  /** A talaj-árnyék helyett fagyos jég-folt a karakter alatt (pl. Fagy-szilánk). */
-  iceShadow?: boolean;
-  /** Zöld, csöpögő méreg-rövidnadrág a csípőn (pl. Méreg-csepp). */
-  poisonShorts?: boolean;
-  /** A fej körvonalának színe (hex) — felülírja az alap barnát (pl. Parázs-könny → izzó vörös). */
-  headOutline?: string;
-  /** Köntös fő színe (hex). */
-  robe?: string;
-  /** Szegély/öv színe (hex). */
-  trim?: string;
-  /** Aura/ragyogás színe a karakter mögött (hex). */
-  glow?: string;
-  /** Dudorok a fejen. */
-  bumps: number;
-  /** Szarvak a fej tetején. */
-  horns: number;
-  /** Tüskék a háton/vállon. */
-  spikes: number;
-  /** Plusz szemek a homlokon. */
-  extraEyes: number;
-  /** Csápok a fej tetején. */
-  antennae: number;
-  /** Farok hátul. */
-  tail: boolean;
 }
 
-/** Friss, módosítatlan alap-kinézet (innen indul a tárgyak halmozása). */
+/** Friss, módosítatlan alap-lövedék-kinézet (innen indul a tárgyak halmozása). */
 export function defaultBodyLook(): BodyLook {
-  return { bumps: 0, horns: 0, spikes: 0, extraEyes: 0, antennae: 0, tail: false };
+  return {};
 }
 
 export function drawPlayer(ctx: CanvasRenderingContext2D, v: PlayerVisual): void {
   if (v.cosmetics?.includes('wraith')) drawWraithForm(ctx, v);
-  else drawCuteCreature(ctx, v);
-}
-
-// Az aranyos kis lény színpalettája a kép alapján
-const CREATURE_PALETTE = {
-  fur: '#f6d5b3',          // Alap krémszínű bunda
-  furLight: '#fbe9d5',     // Világosabb részek (has, pofi)
-  furShadow: '#e3b892',    // Árnyékok a bundán
-  innerEar: '#f0beaa',     // Fül belső, rózsaszínes része
-  eye: '#1c8c53',          // Nagy zöld írisz
-  eyeLight: '#3cd084',     // Világosabb zöld csillogás a szemben
-  outline: '#3a2a26',      // Puha barna körvonal (fekete helyett barátságosabb)
-  blush: 'rgba(240,150,140,0.4)',
-};
-
-function drawCuteCreature(ctx: CanvasRenderingContext2D, v: PlayerVisual): void {
-  const { x, y, r } = v;
-  const t = performance.now() / 1000;
-
-  // Animációs változók a meglévő logikád alapján
-  const bounce = Math.abs(Math.sin(v.walk)) * 3;
-  const breathe = Math.sin(t * 2.5) * 0.5;
-  const step = v.moving ? Math.sin(v.walk) * 3 : 0;
-  const gy = r * 1.0;
-  const TAU = Math.PI * 2;
-
-  // 1. TALAJ-ÁRNYÉK (Fagy-szilánk: jég-folt a sima árnyék helyett)
-  ctx.save();
-  if (v.look?.iceShadow) {
-    const sx = x, sy = y + r * 1.02, srx = r * 0.95, sry = r * 0.36;
-    const g = ctx.createRadialGradient(sx, sy - sry * 0.2, 2, sx, sy, srx);
-    g.addColorStop(0, 'rgba(225,247,255,0.6)');
-    g.addColorStop(0.65, 'rgba(150,212,240,0.42)');
-    g.addColorStop(1, 'rgba(105,165,205,0.12)');
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.ellipse(sx, sy, srx, sry, 0, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(205,238,255,0.65)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.ellipse(sx, sy, srx, sry, 0, 0, TAU); ctx.stroke();
-    // kristály-szilánkok a középből kifelé
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
-    for (let k = 0; k < 6; k++) {
-      const a = (k / 6) * TAU + 0.3;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx + Math.cos(a) * srx * 0.8, sy + Math.sin(a) * sry * 0.8);
-      ctx.stroke();
-    }
-    // csillanás
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.beginPath(); ctx.ellipse(sx - srx * 0.3, sy - sry * 0.3, srx * 0.16, sry * 0.22, -0.4, 0, TAU); ctx.fill();
-  } else {
-    ctx.fillStyle = 'rgba(0,0,0,0.15)'; // Lágyabb árnyék
-    ctx.beginPath();
-    ctx.ellipse(x, y + r * 1.02, r * 0.85, r * 0.32, 0, 0, TAU);
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // Karakter transzformáció (ugrálás + alapbeállítások)
-  ctx.save();
-  ctx.translate(x, y - bounce);
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-
-  // Fej pozíció kiszámítása (kicsit nagyobb súlyt adunk a fejnek)
-  const hx = v.lean * 0.4;
-  const hy = -r * 0.55 + breathe;
-  const hr = r * 0.85; // Extra nagy fej!
-
-  // ==================== LÁBACSKÁK ====================
-  // A láb-szín tárgyból felülírható (Pók-láb → zöld); alapból a bunda.
-  const legCol = v.look?.legColor ?? CREATURE_PALETTE.fur;
-  for (const sgn of [-1, 1]) {
-    const sx = sgn * r * 0.3;
-    const sstep = sgn < 0 ? step : -step;
-
-    ctx.fillStyle = legCol;
-    ctx.strokeStyle = CREATURE_PALETTE.outline;
-    ctx.lineWidth = 1.2;
-    // Pufi kis praclik: kerek tető, lapos alj (D betű 90°-kal elforgatva)
-    const footY = gy + r * 0.02 + sstep;
-    ctx.beginPath();
-    ctx.ellipse(sx, footY, r * 0.18, r * 0.24, 0, Math.PI, 2 * Math.PI); // felső dóm (magasabb, felfelé)
-    ctx.closePath(); // egyenes alsó él
-    ctx.fill(); ctx.stroke();
-  }
-
-  // ==================== SZÁRNYAS SARU (Szárnyas saru) ====================
-  // Kis tollas szárny mindkét láb külső oldalán, kifelé-fel mutatva.
-  if (v.look?.footWingColor) {
-    const wc = v.look.footWingColor;
-    for (const sgn of [-1, 1]) {
-      const sstep = sgn < 0 ? step : -step;
-      const footY = gy + r * 0.02 + sstep;
-      ctx.save();
-      ctx.translate(sgn * r * 0.44, footY - r * 0.16); // a láb külső-felső szélénél
-      ctx.scale(sgn, 1); // tükrözés a jobb lábra → +x mindig „kifelé"
-      ctx.fillStyle = wc;
-      ctx.strokeStyle = shade(wc, -0.45);
-      ctx.lineWidth = 1;
-      // 4 toll legyezőben (kifelé söpörve, felfelé nyílva)
-      for (let i = 0; i < 4; i++) {
-        const ang = 0.05 - i * 0.33;          // a legalsó majdnem vízszintes, fölfelé nyílik
-        const len = r * (0.42 - i * 0.05);
-        ctx.save();
-        ctx.rotate(ang);
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.quadraticCurveTo(len * 0.5, -r * 0.08, len, 0);
-        ctx.quadraticCurveTo(len * 0.5, r * 0.06, 0, 0);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        ctx.restore();
-      }
-      ctx.restore();
-    }
-  }
-
-
-  // ==================== PUFI TEST (RUHA HELYETT) ====================
-  const bodyGrad = ctx.createLinearGradient(0, -r * 0.2, 0, gy);
-  bodyGrad.addColorStop(0, CREATURE_PALETTE.furLight);
-  bodyGrad.addColorStop(0.6, CREATURE_PALETTE.fur);
-  bodyGrad.addColorStop(1, CREATURE_PALETTE.furShadow);
-
-  ctx.fillStyle = bodyGrad;
-  ctx.strokeStyle = CREATURE_PALETTE.outline;
-  ctx.lineWidth = 1.5;
-
-  // Kerekded, pufók törzs
-  ctx.beginPath();
-  ctx.ellipse(0, r * 0.3, r * 0.55, r * 0.45, 0, 0, TAU);
-  ctx.fill(); ctx.stroke();
-
-  // Világosabb pocak-folt (mint a képen)
-  ctx.fillStyle = CREATURE_PALETTE.furLight;
-  ctx.beginPath();
-  ctx.ellipse(0, r * 0.35, r * 0.35, r * 0.28, 0, 0, TAU);
-  ctx.fill();
-
-  // ==================== MÉREG-RÖVIDNADRÁG (Méreg-csepp) ====================
-  // Zöld, nyálkás rövidnadrág a csípőn, a szegélyéről csöpögő méreggel.
-  if (v.look?.poisonShorts) {
-    const top = r * 0.46, bot = r * 0.82, hw = r * 0.52;
-    const g = ctx.createLinearGradient(0, top, 0, bot);
-    g.addColorStop(0, '#84d23f');
-    g.addColorStop(1, '#3f7d1e');
-    ctx.fillStyle = g;
-    ctx.strokeStyle = '#2c5a14';
-    ctx.lineWidth = 1.4;
-    ctx.lineJoin = 'round';
-    // nadrág-test két szárral (alul középen láb-kivágás)
-    ctx.beginPath();
-    ctx.moveTo(-hw, top);
-    ctx.quadraticCurveTo(0, top - r * 0.05, hw, top); // enyhén ívelt derék
-    ctx.lineTo(hw, bot);
-    ctx.lineTo(r * 0.14, bot);
-    ctx.lineTo(0, bot - r * 0.2);                      // középső csúcs → két szár
-    ctx.lineTo(-r * 0.14, bot);
-    ctx.lineTo(-hw, bot);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    // derékpánt (sötétebb sáv)
-    ctx.fillStyle = '#2c5a14';
-    ctx.beginPath();
-    ctx.moveTo(-hw, top);
-    ctx.quadraticCurveTo(0, top - r * 0.05, hw, top);
-    ctx.quadraticCurveTo(0, top + r * 0.04, -hw, top);
-    ctx.closePath();
-    ctx.fill();
-    // nyálkás csillanás
-    ctx.fillStyle = 'rgba(220,255,170,0.4)';
-    ctx.beginPath();
-    ctx.ellipse(-hw * 0.45, top + r * 0.14, r * 0.1, r * 0.05, -0.5, 0, TAU);
-    ctx.fill();
-    // megülő méreg-cseppek a szegélyen (statikus, rövid — nem lóg le, nem takar)
-    ctx.fillStyle = '#9ce64a';
-    for (const [dx, dl] of [[-hw * 0.7, r * 0.05], [-hw * 0.25, r * 0.09], [hw * 0.28, r * 0.04], [hw * 0.7, r * 0.08]] as const) {
-      const by = bot + dl; // a csepp gömbjének teteje
-      ctx.beginPath();
-      ctx.moveTo(dx - 2.2, bot - 1);
-      ctx.lineTo(dx + 2.2, bot - 1);
-      ctx.lineTo(dx + 1.6, by);
-      ctx.quadraticCurveTo(dx + 3.4, by + 3.5, dx, by + 4.5); // gömb-vég
-      ctx.quadraticCurveTo(dx - 3.4, by + 3.5, dx - 1.6, by);
-      ctx.closePath();
-      ctx.fill();
-    }
-  }
-
-  // ==================== MELLKAS-SZÍV (Vér-szív) ====================
-  // Apró, lüktető piros szív a pocak közepén.
-  if (v.look?.chestHeart) {
-    const s = r * 0.16;                       // szív-méret
-    const pulse = 1 + Math.sin(t * 4) * 0.07; // finom lüktetés
-    ctx.save();
-    ctx.translate(0, r * 0.34);
-    ctx.scale(pulse, pulse);
-    ctx.beginPath();
-    ctx.moveTo(0, s * 0.95);
-    ctx.bezierCurveTo(-s * 1.3, s * 0.1, -s * 0.95, -s * 0.95, 0, -s * 0.3);
-    ctx.bezierCurveTo(s * 0.95, -s * 0.95, s * 1.3, s * 0.1, 0, s * 0.95);
-    ctx.closePath();
-    ctx.fillStyle = '#ff3b4e';
-    ctx.strokeStyle = '#9c1f2e';
-    ctx.lineWidth = 1.4;
-    ctx.fill(); ctx.stroke();
-    // fény-csillanás bal felül
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.beginPath();
-    ctx.ellipse(-s * 0.4, -s * 0.32, s * 0.22, s * 0.14, -0.5, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-  }
-
-
-  // ==================== MANCSOK / KAROK ====================
-  // A kéz-szín tárgyból felülírható (Záporkő → kék); alapból a bunda.
-  const handCol = v.look?.handColor ?? CREATURE_PALETTE.fur;
-  for (const sgn of [-1, 1]) {
-    const swing = (sgn < 0 ? step : -step) * 0.4;
-    ctx.fillStyle = handCol;
-    ctx.strokeStyle = CREATURE_PALETTE.outline;
-    ctx.lineWidth = 1.2;
-
-    ctx.save();
-    ctx.translate(sgn * r * 0.5, r * 0.25 + swing);
-    ctx.rotate(sgn * 0.2);
-    ctx.beginPath();
-    // Kis pihe-puha oldalsó mancsok
-    ctx.ellipse(0, 0, r * 0.14, r * 0.22, sgn * 0.1, 0, TAU);
-    ctx.fill(); ctx.stroke();
-    ctx.restore();
-  }
-
-  // ==================== BOKSZKESZTYŰK (Lökő-könny) ====================
-  // Nagy, kerek piros kesztyűk a mancsok fölött, fehér csuklópánttal — ütős.
-  if (v.look?.boxingGloves) {
-    for (const sgn of [-1, 1]) {
-      const swing = (sgn < 0 ? step : -step) * 0.4;
-      ctx.save();
-      ctx.translate(sgn * r * 0.52, r * 0.28 + swing);
-      ctx.rotate(sgn * 0.2);
-      // csuklópánt
-      ctx.fillStyle = '#f0ece4';
-      ctx.strokeStyle = CREATURE_PALETTE.outline;
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.ellipse(0, r * 0.16, r * 0.16, r * 0.08, 0, 0, TAU);
-      ctx.fill(); ctx.stroke();
-      // kesztyű-test
-      ctx.fillStyle = '#e23a2e';
-      ctx.beginPath();
-      ctx.ellipse(0, 0, r * 0.2, r * 0.22, 0, 0, TAU);
-      ctx.fill(); ctx.stroke();
-      // hüvelykujj
-      ctx.beginPath();
-      ctx.ellipse(sgn * r * 0.14, r * 0.04, r * 0.08, r * 0.1, sgn * 0.5, 0, TAU);
-      ctx.fill(); ctx.stroke();
-      // fény-csillanás
-      ctx.fillStyle = 'rgba(255,255,255,0.35)';
-      ctx.beginPath();
-      ctx.ellipse(-r * 0.06, -r * 0.08, r * 0.07, r * 0.05, -0.4, 0, TAU);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-
-
-  // ==================== SZERENCSE-PATKÓ (Patkó) ====================
-  // A jobb mancs fölött tartott, felfelé nyíló vas patkó (U), szegfejekkel.
-  if (v.look?.horseshoe) {
-    const swingR = -step * 0.4;                 // a jobb mancs lengése (sgn=+1)
-    ctx.save();
-    ctx.translate(r * 0.66 + swingR * 0.5, r * 0.0); // a jobb kéz fölé/elé, feljebb emelve
-    ctx.rotate(0.18);                           // enyhe megdöntés (a nyílás közel felfelé)
-    const R = r * 0.21;                         // patkó közép-sugár (nagyobb, jól látszik)
-    const th = r * 0.1;                         // sávvastagság
-    const gap = 0.62;                           // a felső nyílás fél-szöge (rad)
-    const a0 = -Math.PI / 2 + gap;              // a tetőn lévő rés körül indul
-    const a1 = Math.PI * 1.5 - gap;             // …és ér körbe alulról
-    ctx.lineCap = 'butt';
-    // sötét vas-kontúr
-    ctx.strokeStyle = '#3c4450'; ctx.lineWidth = th + 3;
-    ctx.beginPath(); ctx.arc(0, 0, R, a0, a1); ctx.stroke();
-    // fémes test
-    ctx.strokeStyle = '#aab4c0'; ctx.lineWidth = th;
-    ctx.beginPath(); ctx.arc(0, 0, R, a0, a1); ctx.stroke();
-    // felső csillanás a sáv külső peremén
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = th * 0.28;
-    ctx.beginPath(); ctx.arc(0, 0, R + th * 0.28, a0 + 0.2, a1 - 0.5); ctx.stroke();
-    // szegfejek (sötét pöttyök a sáv közepén)
-    ctx.fillStyle = '#2c333d';
-    for (let k = 0; k < 6; k++) {
-      const a = a0 + ((a1 - a0) * (k + 0.5)) / 6;
-      ctx.beginPath();
-      ctx.arc(Math.cos(a) * R, Math.sin(a) * R, th * 0.16, 0, TAU);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-
-  // ==================== NAGY PUHA FÜLEK (FEJ MÖGÖTT) ====================
-  for (const sgn of [-1, 1]) {
-    ctx.save();
-    ctx.translate(hx, hy + hr * 0.1);
-    ctx.scale(sgn, 1);
-
-    // Fülek finom mozgása a lépéseknél
-    ctx.rotate(0.1 + Math.sin(t * 3) * 0.03 + (step * 0.02));
-
-    // Külső fül (bunda) — a BAL fül (sgn=−1) feketére festhető (Repesz-csepp)
-    const earBlack = v.look?.leftEarBlack && sgn === -1;
-    ctx.fillStyle = earBlack ? '#1a1614' : CREATURE_PALETTE.fur;
-    ctx.strokeStyle = CREATURE_PALETTE.outline;
-    ctx.lineWidth = 1.3;
-    ctx.beginPath();
-    ctx.moveTo(hr * 0.5, -hr * 0.2);
-    ctx.quadraticCurveTo(hr * 1.4, -hr * 0.1, hr * 1.3, hr * 0.4);
-    ctx.quadraticCurveTo(hr * 1.0, hr * 0.7, hr * 0.4, hr * 0.3);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-
-    // Belső fül (rózsaszínes rész; fekete fülnél sötét)
-    ctx.fillStyle = earBlack ? '#2e2826' : CREATURE_PALETTE.innerEar;
-    ctx.beginPath();
-    ctx.moveTo(hr * 0.6, -hr * 0.05);
-    ctx.quadraticCurveTo(hr * 1.25, 0, hr * 1.15, hr * 0.3);
-    ctx.quadraticCurveTo(hr * 0.9, hr * 0.5, hr * 0.5, hr * 0.2);
-    ctx.closePath();
-    ctx.fill();
-
-    // Fülbevalók a JOBB fül (sgn=1) külső peremén — három egy sorban
-    if (sgn === 1 && v.look?.earrings) {
-      const studs = [[1.16, 0.32], [1.28, 0.42], [1.36, 0.54]];
-      for (const [sx2, sy2] of studs) {
-        ctx.fillStyle = '#ffd45a';
-        ctx.strokeStyle = '#9c7a1a';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(hr * sx2!, hr * sy2!, hr * 0.052, 0, TAU); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        ctx.beginPath(); ctx.arc(hr * sx2! - hr * 0.016, hr * sy2! - hr * 0.016, hr * 0.018, 0, TAU); ctx.fill();
-      }
-    }
-
-    // Könnycsepp-medálos fülbevaló a JOBB fülön (sgn=1)
-    if (sgn === 1 && v.look?.teardropEarring) {
-      const ax = hr * 1.28, ay = hr * 0.42;
-      ctx.strokeStyle = '#cfd6e0';
-      ctx.lineWidth = hr * 0.022;
-      ctx.beginPath(); ctx.arc(ax, ay, hr * 0.045, 0, TAU); ctx.stroke(); // akasztó-gyűrű
-      const ty = ay + hr * 0.17; // a csepp gömbjének közepe
-      ctx.fillStyle = '#bfe6ff';
-      ctx.strokeStyle = '#6f9fc8';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(ax, ay + hr * 0.07);                              // hegy fent (a gyűrű alatt)
-      ctx.quadraticCurveTo(ax + hr * 0.1, ty - hr * 0.02, ax, ty + hr * 0.07); // jobb ív a gömbhöz
-      ctx.quadraticCurveTo(ax - hr * 0.1, ty - hr * 0.02, ax, ay + hr * 0.07); // bal ív vissza
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
-      ctx.beginPath(); ctx.ellipse(ax - hr * 0.03, ty, hr * 0.022, hr * 0.03, 0, 0, TAU); ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-
-  // ==================== FEJ-DUDOROK (Iker-csepp) ====================
-  // Alacsony, kerek dudorok a fej tetején — szándékosan RENDEZETLENÜL (eltolt
-  // hely, eltérő méret, enyhe döntés), hogy ne tűnjön gépiesen szimmetrikusnak.
-  // A fejet utánuk rajzoljuk, így csak a kupolájuk búvik elő (mint a fülek).
-  const nBumps = v.look?.bumps ?? 0;
-  if (nBumps > 0) {
-    const bRx = hr * 0.28, bRy = hr * 0.20; // szélesebb, mint magas → „dudor", nem szarv
-    const hRx = hr * 1.05, hRy = hr * 0.95; // a fej ellipszisének tengelyei
-    const rnd = (n: number): number => { const s = Math.sin(n * 127.1 + 17.3) * 43758.5453; return s - Math.floor(s); }; // stabil 0..1
-    ctx.fillStyle = v.look?.bumpColor ?? CREATURE_PALETTE.furLight;
-    ctx.strokeStyle = CREATURE_PALETTE.outline;
-    ctx.lineWidth = 1.2;
-    for (let i = 0; i < nBumps; i++) {
-      const spread = nBumps === 1 ? 0 : (i / (nBumps - 1)) * 2 - 1;       // −1..1 alapelosztás
-      const dx = spread * hr * 0.32 + (rnd(i + 1) - 0.5) * hr * 0.12 + hr * 0.05; // széthúzott alap + kis jitter + jobbra-dőlés
-      const sz = 0.78 + rnd(i + 8) * 0.5;                                 // 0.78..1.28 méret-variáció
-      const rot = (rnd(i + 20) - 0.5) * 0.6;                              // enyhe döntés
-      const lift = rnd(i + 31) * bRy * 0.85;                              // egyik feljebb búvik ki, mint a másik
-      const surfaceY = hy - hRy * Math.sqrt(Math.max(0, 1 - (dx / hRx) ** 2));
-      ctx.save();
-      ctx.translate(hx + dx, surfaceY - bRy * 0.1 - lift);
-      ctx.rotate(rot);
-      ctx.beginPath();
-      ctx.ellipse(0, 0, bRx * sz, bRy * sz, 0, 0, TAU);
-      ctx.fill(); ctx.stroke();
-      ctx.restore();
-    }
-  }
-
-  // ==================== PUNK TARÉJ / MOHAWK (Tűhegy) ====================
-  // Hegyes tüske-sor a fej középvonalán, elöl→hátul, középen a legmagasabb.
-  // A fejet utána rajzoljuk, így a tövük a koronába simul.
-  if (v.look?.punkHair) {
-    const spikeCol = '#d83a6a';        // punk-rózsaszín
-    const n = 5;
-    const baseY = hy - hr * 0.86;      // a koronán
-    ctx.save();
-    ctx.fillStyle = spikeCol;
-    ctx.strokeStyle = shade(spikeCol, -0.45);
-    ctx.lineWidth = 1.2;
-    for (let i = 0; i < n; i++) {
-      const tnorm = i / (n - 1);                 // 0..1 (bal→jobb)
-      const sx = hx + (tnorm - 0.5) * hr * 0.7;  // szélesség a koronán
-      const peak = Math.sin(tnorm * Math.PI);    // középen magasabb
-      const h = hr * (0.32 + peak * 0.36);       // tüske-magasság
-      const w = hr * 0.12;
-      ctx.beginPath();
-      ctx.moveTo(sx - w, baseY + hr * 0.05);
-      ctx.lineTo(sx + (tnorm - 0.5) * hr * 0.18, baseY - h); // hegy enyhén hátradől
-      ctx.lineTo(sx + w, baseY + hr * 0.05);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-
-  // ==================== HATALMAS KEREK FEJ ====================
-  const faceGrad = ctx.createLinearGradient(0, hy - hr, 0, hy + hr);
-  faceGrad.addColorStop(0, CREATURE_PALETTE.furLight);
-  faceGrad.addColorStop(0.7, CREATURE_PALETTE.fur);
-  faceGrad.addColorStop(1, CREATURE_PALETTE.furShadow);
-
-  ctx.fillStyle = faceGrad;
-  ctx.beginPath();
-  // Kissé szélesített ellipszis a cuki, pufi pofikért
-  ctx.ellipse(hx, hy, hr * 1.05, hr * 0.95, 0, 0, TAU);
-  ctx.fill();
-  // Körvonal — tárgy felülírhatja (pl. Parázs-könny → izzó vörös perem)
-  if (v.look?.headOutline) {
-    ctx.save();
-    ctx.strokeStyle = v.look.headOutline;
-    ctx.lineWidth = 2.4;
-    ctx.shadowColor = v.look.headOutline;
-    ctx.shadowBlur = 8;
-    ctx.stroke();
-    ctx.restore();
-  } else {
-    ctx.strokeStyle = CREATURE_PALETTE.outline;
-    ctx.lineWidth = 0.8;
-    ctx.stroke();
-  }
-
-  // ==================== FÉL-FEJ FESTÉS (Harci jel / Hármas könny) ====================
-  // A fej egyik felét beborító festés, a fej alakjára vágva, enyhén hullámos
-  // középvonallal (kézzel festett hatás). JOBB = halfHeadColor, BAL =
-  // halfHeadColorLeft (side: +1 jobb, −1 bal — a koordináták tükröződnek).
-  // A szemek/arc utána rajzolódnak rá.
-  if (v.look?.halfHeadColor || v.look?.halfHeadColorLeft) {
-    const paintHalf = (color: string, side: number): void => {
-      ctx.save();
-      ctx.beginPath();
-      ctx.ellipse(hx, hy, hr * 1.05, hr * 0.95, 0, 0, TAU);
-      ctx.clip();
-      const midX = hx + hr * 0.02 * side;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(midX, hy - hr * 1.1);
-      ctx.bezierCurveTo(midX - hr * 0.12 * side, hy - hr * 0.35, midX + hr * 0.14 * side, hy + hr * 0.35, midX - hr * 0.04 * side, hy + hr * 1.1);
-      ctx.lineTo(hx + hr * 1.3 * side, hy + hr * 1.1);
-      ctx.lineTo(hx + hr * 1.3 * side, hy - hr * 1.1);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    };
-    if (v.look.halfHeadColor) paintHalf(v.look.halfHeadColor, 1);
-    if (v.look.halfHeadColorLeft) paintHalf(v.look.halfHeadColorLeft, -1);
-  }
-
-
-  // ==================== HATALMAS ANIME SZEMEK ====================
-  const eyeScale = 1.5;        // 50%-kal nagyobb szemek
-  const es = hr * eyeScale;    // skálázott szem-egység
-  const ex = hx + v.dirX * hr * 0.12;
-  const ey = hy - hr * 0.05 + v.dirY * hr * 0.1;
-  const eyeDX = es * 0.3; // Távolság a két szem között (kicsit közelebb)
-
-  // Írisz-szín: a tárgyak felülírhatják a zöldet (pl. Hegyes Köny → piros).
-  // Csak a zöld részek cserélődnek; a sötét keret/pupilla/csillanás marad.
-  const iris = v.look?.eye ?? CREATURE_PALETTE.eye;
-  const irisLight = v.look?.eye ? shade(v.look.eye, 0.5) : CREATURE_PALETTE.eyeLight;
-
-  for (const sgn of [-1, 1]) {
-    // 1. Szem alapja (Sötétbarna/Fekete keret)
-    ctx.fillStyle = '#1a1412';
-    ctx.beginPath();
-    ctx.ellipse(hx + sgn * eyeDX, ey, es * 0.26, es * 0.28, 0, 0, TAU);
-    ctx.fill();
-
-    // ROBOT-TÁVCSŐ SZEM (Lámpás): a jobb szem helyén izzó vörös szkenner-lencse
-    if (v.look?.scopeEye && sgn === 1) {
-      const cx = hx + eyeDX, cy = ey;
-      const lr = es * 0.27;
-      const pulse = 0.82 + Math.sin(t * 5) * 0.18; // a vörös mag lüktet
-      // fémes lencse-ház + sötét lencse
-      ctx.fillStyle = '#474d57';
-      ctx.beginPath(); ctx.arc(cx, cy, lr, 0, TAU); ctx.fill();
-      ctx.fillStyle = '#0e0f12';
-      ctx.beginPath(); ctx.arc(cx, cy, lr * 0.84, 0, TAU); ctx.fill();
-      // vörös izzás (radiális)
-      const rg = ctx.createRadialGradient(cx, cy, lr * 0.05, cx, cy, lr * 0.84);
-      rg.addColorStop(0, `rgba(255,180,130,${pulse})`);
-      rg.addColorStop(0.38, `rgba(240,32,20,${0.9 * pulse})`);
-      rg.addColorStop(1, 'rgba(110,0,0,0)');
-      ctx.fillStyle = rg;
-      ctx.beginPath(); ctx.arc(cx, cy, lr * 0.84, 0, TAU); ctx.fill();
-      // célkereszt + belső gyűrű (a lencsére vágva)
-      ctx.save();
-      ctx.beginPath(); ctx.arc(cx, cy, lr * 0.84, 0, TAU); ctx.clip();
-      ctx.strokeStyle = 'rgba(255,150,120,0.6)'; ctx.lineWidth = es * 0.014;
-      ctx.beginPath();
-      ctx.moveTo(cx - lr, cy); ctx.lineTo(cx + lr, cy);
-      ctx.moveTo(cx, cy - lr); ctx.lineTo(cx, cy + lr);
-      ctx.arc(cx, cy, lr * 0.5, 0, TAU);
-      ctx.stroke();
-      ctx.restore();
-      // forró fehér mag
-      ctx.fillStyle = '#fff0d8';
-      ctx.beginPath(); ctx.arc(cx, cy, lr * 0.12 * pulse, 0, TAU); ctx.fill();
-      // fémes perem-csillanás a ház tetején
-      ctx.strokeStyle = '#aab2bc'; ctx.lineWidth = es * 0.026;
-      ctx.beginPath(); ctx.arc(cx, cy, lr * 0.92, -2.2, -0.5); ctx.stroke();
-      continue;
-    }
-
-    // 2. Nagy írisz (alap zöld; tárgy felülírhatja, pl. piros)
-    ctx.fillStyle = iris;
-    ctx.beginPath();
-    ctx.ellipse(ex + sgn * eyeDX, ey + es * 0.04, es * 0.22, es * 0.23, 0, 0, TAU);
-    ctx.fill();
-
-    // 3. Világosabb alsó ragyogás (Gradient hatás)
-    ctx.fillStyle = irisLight;
-    ctx.beginPath();
-    ctx.ellipse(ex + sgn * eyeDX, ey + es * 0.1, es * 0.16, es * 0.12, 0, 0, TAU);
-    ctx.fill();
-
-    // Pupilla visszaállítása a ragyogás fölé
-    ctx.fillStyle = '#1a1412';
-    ctx.beginPath();
-    ctx.ellipse(ex + sgn * eyeDX, ey + es * 0.02, es * 0.14, es * 0.16, 0, 0, TAU);
-    ctx.fill();
-
-    // 4. Nagy fehér főcsillanás (Fent-balra)
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(ex + sgn * eyeDX - es * 0.07, ey - es * 0.07, es * 0.07, 0, TAU);
-    ctx.fill();
-
-    // 5. Kisebb másodlagos csillanás (Lent-jobbra)
-    ctx.beginPath();
-    ctx.arc(ex + sgn * eyeDX + es * 0.06, ey + es * 0.1, es * 0.03, 0, TAU);
-    ctx.fill();
-  }
-
-
-  // ==================== SZEMÜVEG (Messzelátó) ====================
-  // Kerek, arany keretes pápaszem a szemek köré — a lencse alatt átlátszik a szem.
-  if (v.look?.glasses) {
-    const lrx = es * 0.285;  // lencse fél-szélesség
-    const lry = es * 0.32;   // lencse fél-magasság
-    const frame = '#16120f';   // fekete keret
-    const frameHi = '#3c332e'; // halk perem-csillanás (felső réteg)
-    ctx.save();
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    for (const sgn of [-1, 1]) {
-      const cx = hx + sgn * eyeDX;
-      // halvány üveg-sheen
-      ctx.fillStyle = 'rgba(180,220,255,0.12)';
-      ctx.beginPath(); ctx.ellipse(cx, ey, lrx, lry, 0, 0, TAU); ctx.fill();
-      // keret: vastag fekete alsó réteg + vékony perem-csillanás (3D hatás)
-      ctx.strokeStyle = frame; ctx.lineWidth = es * 0.06;
-      ctx.beginPath(); ctx.ellipse(cx, ey, lrx, lry, 0, 0, TAU); ctx.stroke();
-      ctx.strokeStyle = frameHi; ctx.lineWidth = es * 0.03;
-      ctx.beginPath(); ctx.ellipse(cx, ey, lrx, lry, 0, 0, TAU); ctx.stroke();
-      // ferde üveg-csillanás
-      ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = es * 0.028;
-      ctx.beginPath();
-      ctx.moveTo(cx - lrx * 0.45, ey - lry * 0.4);
-      ctx.lineTo(cx - lrx * 0.05, ey + lry * 0.15);
-      ctx.stroke();
-      // szár a fül felé
-      ctx.strokeStyle = frame; ctx.lineWidth = es * 0.045;
-      ctx.beginPath();
-      ctx.moveTo(cx + sgn * lrx * 0.98, ey - lry * 0.08);
-      ctx.lineTo(cx + sgn * lrx * 1.7, ey - lry * 0.3);
-      ctx.stroke();
-    }
-    // orr-híd a két lencse között
-    ctx.strokeStyle = frame; ctx.lineWidth = es * 0.045;
-    ctx.beginPath();
-    ctx.moveTo(hx - eyeDX + lrx * 0.85, ey - lry * 0.12);
-    ctx.quadraticCurveTo(hx, ey - lry * 0.34, hx + eyeDX - lrx * 0.85, ey - lry * 0.12);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-
-  // ==================== CUKI ARCBERENDEZÉS ====================
-  // Apró barna nózi
-  ctx.fillStyle = CREATURE_PALETTE.outline;
-  ctx.beginPath();
-  ctx.ellipse(hx, ey + hr * 0.18, hr * 0.05, hr * 0.035, 0, 0, TAU);
-  ctx.fill();
-
-  // Halvány pofi pír (Blush)
-  ctx.fillStyle = CREATURE_PALETTE.blush;
-  ctx.beginPath(); ctx.ellipse(hx - hr * 0.5, ey + hr * 0.24, hr * 0.15, hr * 0.09, 0, 0, TAU); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(hx + hr * 0.5, ey + hr * 0.24, hr * 0.15, hr * 0.09, 0, 0, TAU); ctx.fill();
-
-  // Apró szemöldökök a szemek felett
-  ctx.fillStyle = CREATURE_PALETTE.outline;
-  ctx.beginPath(); ctx.ellipse(hx - hr * 0.32, ey - hr * 0.32, hr * 0.04, hr * 0.02, 0.2, 0, TAU); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(hx + hr * 0.32, ey - hr * 0.32, hr * 0.04, hr * 0.02, -0.2, 0, TAU); ctx.fill();
-
-  // ==================== CÉLKERESZT-JEL (Vadász-szem) ====================
-  if (v.look?.foreheadCrosshair) {
-    const cx = hx, cy = ey - hr * 0.5, rr = hr * 0.12;
-    ctx.strokeStyle = '#d83a6a';
-    ctx.lineWidth = hr * 0.028;
-    ctx.beginPath(); ctx.arc(cx, cy, rr, 0, TAU); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(cx - rr * 1.5, cy); ctx.lineTo(cx + rr * 1.5, cy);
-    ctx.moveTo(cx, cy - rr * 1.5); ctx.lineTo(cx, cy + rr * 1.5);
-    ctx.stroke();
-  }
-
-  // ==================== HOLD-SARLÓ JEL (Holdkő) ====================
-  if (v.look?.crescentMark) {
-    const cx = hx, cy = ey - hr * 0.5, rr = hr * 0.14;
-    ctx.fillStyle = '#cfe8ff';
-    ctx.strokeStyle = '#7fa8d0';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rr, Math.PI * 0.35, Math.PI * 1.65, false);
-    ctx.arc(cx + rr * 0.5, cy, rr * 0.9, Math.PI * 1.55, Math.PI * 0.45, true);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-  }
-
-  // ==================== LEBEGŐ ARANY SZEM (Villám-szem) ====================
-  // Tisztán dísz: egy „mindent látó" arany szem lebeg a fej fölött, finoman.
-  if (v.look?.floatingEye) {
-    const cx = hx, cy = hy - hr * 1.7 + Math.sin(t * 2) * hr * 0.06; // lágy lebegés
-    const ew = hr * 0.55, eh = hr * 0.36;
-    ctx.save();
-    ctx.translate(cx, cy);
-    const eyePath = (): void => {
-      ctx.beginPath();
-      ctx.moveTo(-ew, 0);
-      ctx.quadraticCurveTo(0, -eh, ew, 0);
-      ctx.quadraticCurveTo(0, eh, -ew, 0);
-      ctx.closePath();
-    };
-    // szemfehér + arany ragyogás
-    ctx.shadowColor = 'rgba(255,200,80,0.9)';
-    ctx.shadowBlur = 12;
-    ctx.fillStyle = '#fff4d0';
-    eyePath(); ctx.fill();
-    ctx.shadowBlur = 0;
-    // arany írisz + pupilla, a szem alakjára vágva
-    ctx.save();
-    eyePath(); ctx.clip();
-    const ig = ctx.createRadialGradient(0, 0, 1, 0, 0, eh * 1.3);
-    ig.addColorStop(0, '#ffe79a');
-    ig.addColorStop(0.55, '#ffc22a');
-    ig.addColorStop(1, '#c8860f');
-    ctx.fillStyle = ig;
-    ctx.beginPath(); ctx.arc(0, 0, eh * 1.1, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#241a08';
-    ctx.beginPath(); ctx.arc(0, 0, eh * 0.5, 0, TAU); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.beginPath(); ctx.arc(-eh * 0.28, -eh * 0.28, eh * 0.18, 0, TAU); ctx.fill();
-    ctx.restore();
-    // körvonal felülre
-    ctx.strokeStyle = '#a8791f';
-    ctx.lineWidth = 1.6;
-    eyePath(); ctx.stroke();
-    ctx.restore();
-  }
-
-  // ==================== RUGÓS ANTENNA (Gumifal) ====================
-  if (v.look?.springAntenna) {
-    const baseY = hy - hr * 0.9;
-    const topY = baseY - hr * 0.55;
-    ctx.save();
-    ctx.strokeStyle = '#3fa03f';
-    ctx.lineWidth = hr * 0.045;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    for (let i = 0; i <= 24; i++) {
-      const tt = i / 24;
-      const yy = baseY + (topY - baseY) * tt;
-      const xx = hx + Math.sin(tt * 3 * TAU) * hr * 0.09;
-      if (i === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
-    }
-    ctx.stroke();
-    ctx.fillStyle = '#7fe07f';
-    ctx.strokeStyle = CREATURE_PALETTE.outline;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.arc(hx, topY - hr * 0.07, hr * 0.1, 0, TAU);
-    ctx.fill(); ctx.stroke();
-    ctx.restore();
-  }
-
-
-  // ==================== SÖTÉT FÁTYOL ====================
-  // Enyhén áttetsző, sötét lepel a fejre borítva, hullámos szegéllyel — az arc
-  // halványan átdereng (a perk csökkenti a látótávot, ez vizuálisan is rímel rá).
-  if (v.look?.veil) {
-    const topY = hy - hr * 1.2;     // a korona fölött
-    const vW = hr * 1.34;           // fél-szélesség (a fejen kívülre lóg)
-    const hemY = hy + hr * 0.95;    // a szegély a testre lóg
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(hx - vW, hemY);
-    ctx.quadraticCurveTo(hx - vW * 1.05, hy - hr * 0.5, hx - hr * 0.5, topY); // bal oldal fel a koronáig
-    ctx.quadraticCurveTo(hx, topY - hr * 0.22, hx + hr * 0.5, topY);          // ív a korona fölött
-    ctx.quadraticCurveTo(hx + vW * 1.05, hy - hr * 0.5, hx + vW, hemY);       // jobb oldal le
-    const n = 4; // hullámos szegély jobbról balra
-    for (let i = 1; i <= n; i++) {
-      const cxw = hx + vW - 2 * vW * ((i - 0.5) / n);
-      const nxw = hx + vW - 2 * vW * (i / n);
-      ctx.quadraticCurveTo(cxw, hemY + hr * 0.12, nxw, hemY);
-    }
-    ctx.closePath();
-    const vg = ctx.createLinearGradient(0, topY, 0, hemY);
-    vg.addColorStop(0, 'rgba(16,9,26,0.52)');
-    vg.addColorStop(0.6, 'rgba(26,15,40,0.42)');
-    vg.addColorStop(1, 'rgba(34,20,52,0.30)');
-    ctx.fillStyle = vg;
-    ctx.fill();
-    // halk korona-csillanás (a lepel teteje)
-    ctx.strokeStyle = 'rgba(150,140,185,0.25)';
-    ctx.lineWidth = hr * 0.03;
-    ctx.beginPath();
-    ctx.moveTo(hx - hr * 0.5, topY + hr * 0.02);
-    ctx.quadraticCurveTo(hx, topY - hr * 0.2, hx + hr * 0.5, topY + hr * 0.02);
-    ctx.stroke();
-    // finom függőleges redők
-    ctx.strokeStyle = 'rgba(8,5,14,0.22)';
-    ctx.lineWidth = hr * 0.02;
-    for (const fx of [-0.55, 0.05, 0.6]) {
-      ctx.beginPath();
-      ctx.moveTo(hx + fx * hr * 0.5, topY + hr * 0.12);
-      ctx.quadraticCurveTo(hx + fx * hr, hy, hx + fx * hr * 1.2, hemY - hr * 0.08);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  ctx.restore();
+  else drawNim(ctx, v);                         // ALAP karakter: „Nim"
 }
 
 /* ===================================================================== *
@@ -1037,6 +202,312 @@ export function drawWraithForm(ctx: CanvasRenderingContext2D, v: PlayerVisual): 
   ctx.moveTo(hx - hr * 0.78, hy + hr * 0.1);
   ctx.bezierCurveTo(hx - hr * 0.85, hy - hr * 0.6, hx - hr * 0.3, hy - hr * 1.12, hx + hr * 0.05, hy - hr * 1.05);
   ctx.stroke();
+
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+/* ===================================================================== *
+ *  ALAP KARAKTER — „Nim"
+ *  Csuklyás, egyetlen nagy szemű kis lény: sötét, rongyos köpeny, vékony
+ *  lábak, kéztőr. A Mireveil (Hollow Knight-esztétika) HANGULATÁRA hangolva,
+ *  de PROCEDURÁLISAN (asset nélkül) - a festett textúrát nem éri el, a sziluett
+ *  és a hangulat igen.
+ * ===================================================================== */
+const SH = {
+  cloak: '#3c4047',
+  cloakLight: '#565b65',
+  cloakDark: '#252830',
+  cloakDarkest: '#15171c',
+  cave: '#070809',
+  eyeWhite: '#efe9da',
+  eyeShade: '#c9c2af',
+  pupil: '#16110e',
+  leg: '#1a1a1f',
+  blade: '#ced3da',
+  bladeDark: '#7f858e',
+  hilt: '#3a2b1d',
+  outline: '#121318',
+  rim: 'rgba(150,162,186,0.22)',
+};
+
+/** Aranyos, mutató fehér kézfej (cx,cy) köré, `ang` szögben, `r` mérettel.
+ *  A bal féltekében függőlegesen tükröz (`flip`), hogy a mutatóujj mindig fent legyen. */
+function drawPointingHand(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number, ang: number,
+): void {
+  const cL = [0.04, 0.045, 0.05];   // behajlított ujjak (rövid)
+  const cY = [0.11, 0.04, -0.03];
+  const cX = [0.08, 0.10, 0.11];
+  const flip = Math.abs(ang) > Math.PI / 2;   // bal félteke → ne álljon fejre
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(ang);                             // a mutatóujj +x (előre)
+  if (flip) ctx.scale(1, -1);
+
+  // 1. a teljes forma egyben, fehérrel
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.ellipse(-r * 0.02, r * 0.11, r * 0.06, r * 0.045, 0.4, 0, TAU);   // hüvelyk
+  ctx.fill();
+  for (let k = 0; k < 3; k++) {
+    ctx.beginPath();
+    ctx.ellipse(r * cX[k]!, r * cY[k]!, r * cL[k]!, r * 0.04, 0, 0, TAU);
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.ellipse(r * 0.21, -r * 0.08, r * 0.13, r * 0.043, -0.05, 0, TAU); // mutatóujj (összeér a tenyérrel)
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r * 0.14, r * 0.17, 0, 0, TAU);                      // tenyér
+  ctx.fill();
+
+  // 2. körvonalak
+  ctx.strokeStyle = 'rgba(100,95,110,0.4)';
+  ctx.lineWidth = r * 0.014;
+  const ds = (b: () => void): void => { ctx.beginPath(); b(); ctx.stroke(); };
+  for (let k = 0; k < 3; k++) {
+    ds(() => ctx.ellipse(r * cX[k]!, r * cY[k]!, r * cL[k]!, r * 0.04, 0, 0, TAU));
+  }
+  ds(() => ctx.ellipse(-r * 0.02, r * 0.11, r * 0.06, r * 0.045, 0.4, 0, TAU));
+  ds(() => ctx.ellipse(r * 0.21, -r * 0.08, r * 0.13, r * 0.043, -0.05, 0, TAU));
+  ds(() => ctx.ellipse(0, 0, r * 0.14, r * 0.17, 0, 0, TAU));
+
+  // 3. belső pír + csillanás
+  const pg = ctx.createRadialGradient(-r * 0.02, 0, r * 0.01, 0, 0, r * 0.13);
+  pg.addColorStop(0, '#fff6f2');
+  pg.addColorStop(1, '#e8e2d5');
+  ctx.fillStyle = pg;
+  ctx.beginPath();
+  ctx.ellipse(-r * 0.01, 0, r * 0.10, r * 0.12, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath();
+  ctx.ellipse(-r * 0.05, -r * 0.05, r * 0.035, r * 0.02, -0.4, 0, TAU);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+export function drawNim(ctx: CanvasRenderingContext2D, v: PlayerVisual): void {
+  const { x, y, r } = v;
+  const t = performance.now() / 1000;
+  const bounce = Math.abs(Math.sin(v.walk)) * 2.0;
+  const step = v.moving ? Math.sin(v.walk) * 2.6 : 0;
+  const breathe = Math.sin(t * 2) * 0.5;
+  const floatY = Math.sin(t * 1.6) * r * 0.05;            // finom lebegés
+  // mozgás-erősség (0..1) és -irány: ettől leng a csuklya és lobog a köpeny menés közben
+  const mvLen = Math.hypot(v.moveX ?? 0, v.moveY ?? 0);
+  const moveAmt = Math.min(1, mvLen / 120);
+  const mvx = mvLen > 1 ? (v.moveX ?? 0) / mvLen : 0;
+  const mvy = mvLen > 1 ? (v.moveY ?? 0) / mvLen : 0;
+  const flap = Math.sin(t * 9 + v.walk);                  // gyors lobogás-fázis
+  // a csuklya-hegy a mozgással SZEMBE dől + leng (mint szélben)
+  const hoodSway = Math.sin(t * 1.1) * 0.05 + flap * moveAmt * 0.1 - mvx * moveAmt * 0.22;
+  const dl = Math.hypot(v.dirX, v.dirY) || 1;
+  const ax = v.dirX / dl, ay = v.dirY / dl;       // célzás-irány (a szem ÉS a kéz efelé néz)
+  const rnd = (n: number): number => { const s = Math.sin(n * 127.1 + 17.3) * 43758.5453; return s - Math.floor(s); };
+
+  // ===== TALAJ-ÁRNYÉK (puha) =====
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + r * 0.68, r * 0.74, r * 0.28, 0, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  // a teszt-karakter VIZUÁLISAN nagyobb (az ütközés-sugár marad `r`); a talajhoz
+  // rögzítve nagyobbodik felfelé, ezért a translate-et `(S-1)*r`-rel feljebb visszük
+  const S = 0.9;   // a régi karakter magasságára hangolva (mért egyezés)
+  ctx.translate(x, y - bounce + floatY - (S - 1) * r);
+  ctx.scale(S, S);
+  if (v.invuln > 0 && Math.floor(v.invuln * 16) % 2 === 0) ctx.globalAlpha = 0.45;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  const gy = r * 1.0;
+  // a fej/test a MOZGÁS felé dől („belehajol"), míg a szem a lövésre néz
+  const hx = v.lean * 0.34 + mvx * moveAmt * r * 0.24;
+  const hy = -r * 0.66 + breathe + mvy * moveAmt * r * 0.12;
+  const hr = r * 0.86;               // a fej DOMINÁL (sokkal nagyobb a vékony testnél)
+
+  // ===== LÁBAK (Nim-szerű pufi praclik: kerek tető, lapos alj) =====
+  for (const sgn of [-1, 1]) {
+    const sstep = sgn < 0 ? step : -step;
+    const footY = gy * 0.64 + sstep * 0.5;
+    const lg = ctx.createLinearGradient(0, footY - r * 0.2, 0, footY);
+    lg.addColorStop(0, SH.cloak);
+    lg.addColorStop(1, SH.cloakDarkest);
+    ctx.fillStyle = lg;
+    ctx.strokeStyle = SH.outline;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.ellipse(sgn * r * 0.17, footY, r * 0.16, r * 0.21, 0, Math.PI, 2 * Math.PI); // felső dóm
+    ctx.closePath(); // egyenes alsó él
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // ===== KÖPENY-TEST (sötét, rongyos szegéllyel) =====
+  const cloakGrad = ctx.createLinearGradient(0, hy, 0, gy * 1.1);
+  cloakGrad.addColorStop(0, SH.cloakLight);
+  cloakGrad.addColorStop(0.45, SH.cloak);
+  cloakGrad.addColorStop(1, SH.cloakDarkest);
+  ctx.fillStyle = cloakGrad;
+  ctx.strokeStyle = SH.outline;
+  ctx.lineWidth = 2;
+  const tatters = 6;
+  const hemY = gy * 0.6;             // rövidebb (függőlegesen kisebb) test
+  const neckY = hy + hr * 0.66;      // a vékony köpeny a NAGY fej alá csatlakozik
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.3, neckY);
+  ctx.bezierCurveTo(-r * 0.46, r * 0.16, -r * 0.5, r * 0.38, -r * 0.44 + step * 0.4, hemY);
+  // tépett alsó szegély (változó mélységű csúcsok)
+  for (let i = 0; i <= tatters; i++) {
+    const f = -0.44 + (0.88 * i) / tatters;
+    const wave = Math.sin(t * 9 + i * 0.9) * r * 0.07 * moveAmt;   // a szegély hullámzik menés közben
+    const px = r * f + step * (f * 0.5) + mvx * moveAmt * r * 0.08; // + a mozgás mögé lobog
+    const deep = (i % 2 === 0 ? hemY + r * (0.05 + rnd(i + 3) * 0.13) : hemY - r * 0.04) + wave;
+    ctx.lineTo(px, deep);
+  }
+  ctx.bezierCurveTo(r * 0.5, r * 0.38, r * 0.46, r * 0.16, r * 0.3, neckY);
+  // vékony nyak-ív a fej alatt
+  ctx.quadraticCurveTo(0, neckY - hr * 0.06, -r * 0.3, neckY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // köpeny-redők (sötét függőleges görbék)
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.lineWidth = 1.3;
+  for (const fx of [-0.2, 0.02, 0.22]) {
+    ctx.beginPath();
+    ctx.moveTo(r * fx, hy + hr * 0.66 + breathe);
+    ctx.quadraticCurveTo(r * fx * 1.4, r * 0.6, r * fx * 1.5, hemY - r * 0.06);
+    ctx.stroke();
+  }
+  // kopott foltok (szabálytalan, halvány sötét pacák a festett-kopott hatáshoz)
+  for (let i = 0; i < 4; i++) {
+    const bx = (rnd(i * 2 + 1) - 0.5) * r * 0.66;
+    const by = hy + hr * 0.78 + rnd(i * 2 + 5) * r * 0.7;
+    ctx.fillStyle = `rgba(10,11,14,${0.18 + rnd(i + 9) * 0.16})`;
+    ctx.beginPath();
+    ctx.ellipse(bx, by, r * (0.06 + rnd(i + 2) * 0.06), r * (0.05 + rnd(i + 4) * 0.05), rnd(i) * TAU, 0, TAU);
+    ctx.fill();
+  }
+  // hideg perem-fény a köpeny bal-felső szélén (hangulat)
+  ctx.strokeStyle = SH.rim;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.46, r * 0.32);
+  ctx.bezierCurveTo(-r * 0.52, r * 0.0, -r * 0.42, hy + hr * 0.6, -r * 0.26, hy + hr * 0.62);
+  ctx.stroke();
+
+  // a teljes fej (csuklya + arc-üreg + szem) kissé szélesebb vízszintesen
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.scale(1.14, 1);
+  ctx.translate(-hx, -hy);
+
+  // ===== CSUKLYA (NAGYOBB keret a fej körül; a szem/arc mérete változatlan) =====
+  ctx.save();
+  const hd = hr * 0.98;                       // a csuklya csak keret (a fej/szem dominál)
+  const hoodGrad = ctx.createLinearGradient(0, hy - hd * 1.5, 0, hy + hd * 0.6);
+  hoodGrad.addColorStop(0, SH.cloakLight);
+  hoodGrad.addColorStop(0.55, SH.cloak);
+  hoodGrad.addColorStop(1, SH.cloakDark);
+  ctx.fillStyle = hoodGrad;
+  ctx.strokeStyle = SH.outline;
+  ctx.lineWidth = 2;
+  const tipX = hx + hd * (0.5 + hoodSway);    // a csuklya-hegy oldalra hajlik
+  const tipY = hy - hd * 1.62;                // MAGASABB szürke csuklya-szövet (függőlegesen nagyobb)
+  ctx.beginPath();
+  ctx.moveTo(hx - hd * 0.92, hy + hd * 0.45);
+  ctx.bezierCurveTo(hx - hd * 1.04, hy - hd * 0.78, hx - hd * 0.5, hy - hd * 1.36, hx - hd * 0.06, hy - hd * 1.28);
+  ctx.quadraticCurveTo(tipX - hd * 0.1, tipY + hd * 0.22, tipX, tipY);            // fel a hegyig
+  ctx.quadraticCurveTo(tipX + hd * 0.16, tipY + hd * 0.42, hx + hd * 0.5, hy - hd * 0.88); // a hegy vissza-görbül
+  ctx.bezierCurveTo(hx + hd * 1.02, hy - hd * 0.56, hx + hd * 0.96, hy + hd * 0.2, hx + hd * 0.92, hy + hd * 0.45);
+  ctx.quadraticCurveTo(hx, hy + hd * 0.86, hx - hd * 0.92, hy + hd * 0.45);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // csuklya perem-fény (bal-felső)
+  ctx.strokeStyle = SH.rim;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(hx - hd * 0.86, hy + hd * 0.2);
+  ctx.bezierCurveTo(hx - hd * 0.96, hy - hd * 0.78, hx - hd * 0.5, hy - hd * 1.3, hx - hd * 0.08, hy - hd * 1.22);
+  ctx.stroke();
+  ctx.restore();
+
+  // ===== ARC-ÜREG (mély fekete a csuklya alatt) =====
+  const caveG = ctx.createRadialGradient(hx, hy + hr * 0.12, hr * 0.08, hx, hy + hr * 0.1, hr * 0.9);
+  caveG.addColorStop(0, '#000000');
+  caveG.addColorStop(0.7, SH.cave);
+  caveG.addColorStop(1, SH.cloakDarkest);
+  ctx.fillStyle = caveG;
+  ctx.beginPath();
+  ctx.ellipse(hx, hy + hr * 0.12, hr * 0.84, hr * 0.8, 0, 0, TAU);
+  ctx.fill();
+
+  // ===== A NAGY FÉLSZEM (a fej domináns eleme; a CÉLZÁS/lövés irányába néz) =====
+  const eX = hx + ax * hr * 0.16;
+  const eY = hy + hr * 0.12 + ay * hr * 0.1;
+  const eRx = hr * 0.6, eRy = hr * 0.6;     // NAGY szem, kissé szélesebb (a fej-skála tovább szélesíti)
+  // szemfehér (lágy gradiens, alul árnyékos)
+  const eg = ctx.createLinearGradient(eX, eY - eRy, eX, eY + eRy);
+  eg.addColorStop(0, '#ffffff');
+  eg.addColorStop(0.6, SH.eyeWhite);
+  eg.addColorStop(1, SH.eyeShade);
+  ctx.fillStyle = eg;
+  ctx.beginPath();
+  ctx.ellipse(eX, eY, eRx, eRy, 0, 0, TAU);
+  ctx.fill();
+  // nagy pupilla (a célzás felé tolva)
+  const pX = eX + ax * eRx * 0.32, pY = eY + ay * eRy * 0.3;
+  ctx.fillStyle = SH.pupil;
+  ctx.beginPath();
+  ctx.ellipse(pX, pY, eRx * 0.5, eRy * 0.52, 0, 0, TAU);
+  ctx.fill();
+  // mély-fény a pupillában + éles csillanás
+  ctx.fillStyle = 'rgba(80,90,120,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(pX, pY + eRy * 0.12, eRx * 0.34, eRy * 0.3, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.ellipse(pX - eRx * 0.18, pY - eRy * 0.24, eRx * 0.16, eRy * 0.18, -0.4, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.beginPath();
+  ctx.arc(pX + eRx * 0.2, pY + eRy * 0.2, eRx * 0.08, 0, TAU);
+  ctx.fill();
+  // szem-perem árnyék (a szemgödör mélysége)
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.ellipse(eX, eY, eRx, eRy, 0, Math.PI * 0.85, Math.PI * 2.15);
+  ctx.stroke();
+
+  ctx.restore();   // a fej-szélesítés vége
+
+  // ===== ARANYOS PICI FEHÉR TENYÉR (a köpeny alól a célzásirányba) =====
+  ctx.save();
+  const handX = hx + ax * r * 0.6 - ay * r * 0.22;
+  const handY = gy * 0.26 + ay * r * 0.44 + ax * r * 0.12 + Math.sin(t * 3) * r * 0.02;
+  // árny-karocska a köpenytől a tenyérig
+  ctx.strokeStyle = SH.cloakDark;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = r * 0.1;
+  ctx.beginPath();
+  ctx.moveTo(hx + ax * r * 0.16, gy * 0.12);
+  ctx.lineTo(handX - ax * r * 0.12, handY - ay * r * 0.12);
+  ctx.stroke();
+  // a mutató kéz a célzás felé (az ujj arra mutat, ahova lő); fele méret
+  drawPointingHand(ctx, handX, handY, r * 0.46, Math.atan2(ay, ax));
+  ctx.restore();
 
   ctx.restore();
   ctx.globalAlpha = 1;
